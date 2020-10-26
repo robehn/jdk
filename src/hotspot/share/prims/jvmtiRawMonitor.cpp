@@ -233,31 +233,10 @@ int JvmtiRawMonitor::simple_wait(Thread* self, jlong millis) {
   guarantee(_owner != self, "invariant");
 
   int ret = M_OK;
-  if (self->is_Java_thread()) {
-    JavaThread* jt = self->as_Java_thread();
-    // Transition to VM so we can check interrupt state
-    ThreadInVMfromNative tivm(jt);
-    if (jt->is_interrupted(true)) {
-        ret = M_INTERRUPTED;
-    } else {
-      ThreadBlockInVM tbivm(jt);
-      jt->set_suspend_equivalent();
-      if (millis <= 0) {
-        self->_ParkEvent->park();
-      } else {
-        self->_ParkEvent->park(millis);
-      }
-      // Return to VM before post-check of interrupt state
-    }
-    if (jt->is_interrupted(true)) {
-      ret = M_INTERRUPTED;
-    }
+  if (millis <= 0) {
+    self->_ParkEvent->park();
   } else {
-    if (millis <= 0) {
-      self->_ParkEvent->park();
-    } else {
-      self->_ParkEvent->park(millis);
-    }
+    self->_ParkEvent->park(millis);
   }
 
   dequeue_waiter(node);
@@ -307,7 +286,6 @@ void JvmtiRawMonitor::simple_notify(Thread* self, bool all) {
   return;
 }
 
-// Any JavaThread will enter here with state _thread_blocked
 void JvmtiRawMonitor::raw_enter(Thread* self) {
   void* contended;
   JavaThread* jt = NULL;
@@ -315,15 +293,9 @@ void JvmtiRawMonitor::raw_enter(Thread* self) {
   // surprise the suspender if a "suspended" thread can still enter monitor
   if (self->is_Java_thread()) {
     jt = self->as_Java_thread();
-    jt->SR_lock()->lock_without_safepoint_check();
-    while (jt->is_external_suspend()) {
-      jt->SR_lock()->unlock();
-      jt->java_suspend_self();
-      jt->SR_lock()->lock_without_safepoint_check();
-    }
+    guarantee(jt->thread_state() != _thread_blocked, "invariant");
     // guarded by SR_lock to avoid racing with new external suspend requests.
     contended = Atomic::cmpxchg(&_owner, (Thread*)NULL, jt);
-    jt->SR_lock()->unlock();
   } else {
     contended = Atomic::cmpxchg(&_owner, (Thread*)NULL, self);
   }
@@ -340,32 +312,25 @@ void JvmtiRawMonitor::raw_enter(Thread* self) {
   }
 
   self->set_current_pending_raw_monitor(this);
-
+      
   if (!self->is_Java_thread()) {
     simple_enter(self);
   } else {
-    guarantee(jt->thread_state() == _thread_blocked, "invariant");
+    JavaThreadState org_ts = jt->thread_state();
     for (;;) {
-      jt->set_suspend_equivalent();
-      // cleared by handle_special_suspend_equivalent_condition() or
-      // java_suspend_self()
+      // Unfortunately we must hand roll the tranisition to not get suspended if we get lock.
+      jt->frame_anchor()->make_walkable(jt);
+      OrderAccess::storestore();
+      jt->set_thread_state(_thread_blocked);
       simple_enter(jt);
-
-      // were we externally suspended while we were waiting?
-      if (!jt->handle_special_suspend_equivalent_condition()) {
+      jt->set_thread_state_fence(_thread_blocked_trans);
+      if (SafepointMechanism::should_process(jt)) {
+        simple_exit(jt);
+        SafepointMechanism::process_if_requested(jt);
+      } else {
+        jt->set_thread_state(org_ts);
         break;
       }
-
-      // This thread was externally suspended
-      // We have reentered the contended monitor, but while we were
-      // waiting another thread suspended us. We don't want to reenter
-      // the monitor while suspended because that would surprise the
-      // thread that suspended us.
-      //
-      // Drop the lock
-      simple_exit(jt);
-
-      jt->java_suspend_self();
     }
   }
 
@@ -401,44 +366,56 @@ int JvmtiRawMonitor::raw_wait(jlong millis, Thread* self) {
   OrderAccess::fence();
 
   intptr_t save = _recursions;
+  if (!self->is_Java_thread()) {
+    _recursions = 0;
+    _waiters++;
+    ret = simple_wait(self, millis);
+    _recursions = save;
+    _waiters--;
+    guarantee(self == _owner, "invariant");
+    assert(ret != M_INTERRUPTED, "Only JavaThreads can be interrupted");
+    return ret;
+  }
+  // Java thread
+  JavaThread* jt = self->as_Java_thread();
+  JavaThreadState org_ts = jt->thread_state();
+    
   _recursions = 0;
   _waiters++;
+      
+  // Unfortunately we must hand roll the tranisition to not get suspended if we get lock.
+  jt->frame_anchor()->make_walkable(jt);
+  OrderAccess::storestore();
+  jt->set_thread_state(_thread_blocked);
   ret = simple_wait(self, millis);
+  
   _recursions = save;
   _waiters--;
-
+  
   guarantee(self == _owner, "invariant");
 
-  if (self->is_Java_thread()) {
-    JavaThread* jt = self->as_Java_thread();
-    for (;;) {
-      jt->set_suspend_equivalent();
-      if (!jt->handle_special_suspend_equivalent_condition()) {
-        break;
-      } else {
-        // We've been suspended whilst waiting and so we have to
-        // relinquish the raw monitor until we are resumed. Of course
-        // after reacquiring we have to re-check for suspension again.
-        // Suspension requires we are _thread_blocked, and we also have to
-        // recheck for being interrupted.
-        simple_exit(jt);
-        {
-          ThreadInVMfromNative tivm(jt);
-          {
-            ThreadBlockInVM tbivm(jt);
-            jt->java_suspend_self();
-          }
-          if (jt->is_interrupted(true)) {
-            ret = M_INTERRUPTED;
-          }
-        }
-        simple_enter(jt);
+  // Java thread have been woken from wait
+  for (;;) {
+    // Unfortunately we must hand roll the tranisition to not get suspended if we get lock.
+    jt->set_thread_state_fence(_thread_blocked_trans);
+    if (SafepointMechanism::should_process(jt)) {
+      simple_exit(jt);
+      SafepointMechanism::process_if_requested(jt);
+    } else {
+      if (jt->is_interrupted(true)) {
+        ret = M_INTERRUPTED;
       }
+      jt->set_thread_state(org_ts);
+      break;
     }
-    guarantee(jt == _owner, "invariant");
-  } else {
-    assert(ret != M_INTERRUPTED, "Only JavaThreads can be interrupted");
+    if (jt->is_interrupted(true)) {
+      ret = M_INTERRUPTED;
+    }
+    jt->set_thread_state(_thread_blocked);
+    simple_enter(jt);
   }
+  
+  guarantee(self == _owner, "invariant");
 
   return ret;
 }

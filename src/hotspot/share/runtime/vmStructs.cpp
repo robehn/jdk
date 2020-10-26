@@ -767,6 +767,12 @@ typedef HashtableEntry<InstanceKlass*, mtClass>  KlassHashtableEntry;
   nonstatic_field(Thread,                      _resource_area,                                ResourceArea*)                         \
   nonstatic_field(CompilerThread,              _env,                                          ciEnv*)                                \
                                                                                                                                      \
+  /*********************************/                                                                                                \
+  /* JavaThread (NOTE: incomplete) */                                                                                                \
+  /*********************************/                                                                                                \
+                                                                                                                                     \
+  nonstatic_field(JavaThread,                  _suspended,                                    bool)                                  \
+                                                                                                                                     \
   /************/                                                                                                                     \
   /* OSThread */                                                                                                                     \
   /************/                                                                                                                     \
@@ -2146,8 +2152,6 @@ typedef HashtableEntry<InstanceKlass*, mtClass>  KlassHashtableEntry;
   /* Thread::SuspendFlags enum */                                         \
   /*****************************/                                         \
                                                                           \
-  declare_constant(Thread::_external_suspend)                             \
-  declare_constant(Thread::_ext_suspended)                                \
   declare_constant(Thread::_has_async_exception)                          \
                                                                           \
   /*******************/                                                   \

@@ -104,7 +104,7 @@ public:
       Threads::add(this);
     }
     {
-      MutexLocker ml(SR_lock(), Mutex::_no_safepoint_check_flag);
+      MutexLocker ml(UtilLock(), Mutex::_no_safepoint_check_flag);
     }
   }
 

@@ -32,6 +32,7 @@
 #include "runtime/java.hpp"
 #include "runtime/os.hpp"
 #include "runtime/osThread.hpp"
+#include "runtime/semaphore.inline.hpp"
 #include "runtime/stubRoutines.hpp"
 #include "runtime/thread.hpp"
 #include "signals_posix.hpp"
@@ -302,27 +303,7 @@ static int check_pending_signals() {
         return i;
       }
     }
-    JavaThread *thread = JavaThread::current();
-    ThreadBlockInVM tbivm(thread);
-
-    bool threadIsSuspended;
-    do {
-      thread->set_suspend_equivalent();
-      // cleared by handle_special_suspend_equivalent_condition() or java_suspend_self()
-      sig_semaphore->wait();
-
-      // were we externally suspended while we were waiting?
-      threadIsSuspended = thread->handle_special_suspend_equivalent_condition();
-      if (threadIsSuspended) {
-        // The semaphore has been incremented, but while we were waiting
-        // another thread suspended us. We don't want to continue running
-        // while suspended because that would surprise the thread that
-        // suspended us.
-        sig_semaphore->signal();
-
-        thread->java_suspend_self();
-      }
-    } while (threadIsSuspended);
+    sig_semaphore->wait_with_safepoint_check(JavaThread::current());
   }
   ShouldNotReachHere();
   return 0; // Satisfy compiler
@@ -1582,8 +1563,10 @@ static void SR_handler(int sig, siginfo_t* siginfo, ucontext_t* context) {
   // will fail because the thread is no longer a JavaThread as the ~JavaThread
   // destructor has completed.
 
-  if (thread->SR_lock() == NULL) {
-    return;
+  if (thread->is_Java_thread()) {
+    if (thread->as_Java_thread()->UtilLock() == NULL) {
+      return;
+    }
   }
 
   assert(thread->is_VM_thread() || thread->is_Java_thread(), "Must be VMThread or JavaThread");

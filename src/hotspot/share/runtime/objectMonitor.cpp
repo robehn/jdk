@@ -404,29 +404,29 @@ bool ObjectMonitor::enter(TRAPS) {
     }
 
     OSThreadContendState osts(Self->osthread());
-    ThreadBlockInVM tbivm(jt);
-
-    // TODO-FIXME: change the following for(;;) loop to straight-line code.
+      
+    JavaThreadState org_ts = jt->thread_state();
     for (;;) {
-      jt->set_suspend_equivalent();
-      // cleared by handle_special_suspend_equivalent_condition()
-      // or java_suspend_self()
-
+      jt->frame_anchor()->make_walkable(jt);
+      OrderAccess::storestore();
+      jt->set_thread_state(_thread_blocked);
       EnterI(THREAD);
-
-      if (!ExitSuspendEquivalent(jt)) break;
-
-      // We have acquired the contended monitor, but while we were
-      // waiting another thread suspended us. We don't want to enter
-      // the monitor while suspended because that would surprise the
-      // thread that suspended us.
-      //
-      _recursions = 0;
-      _succ = NULL;
-      exit(false, Self);
-
-      jt->java_suspend_self();
+      jt->set_thread_state_fence(_thread_blocked_trans);
+      if (SafepointMechanism::should_process(jt)) {
+        // We have acquired the contended monitor, but while we were
+        // waiting another thread suspended us. We don't want to enter
+        // the monitor while suspended because that would surprise the
+        // thread that suspended us.
+        _recursions = 0;
+        _succ = NULL;
+        exit(false, Self);
+        SafepointMechanism::process_if_requested(jt);
+      } else {
+        jt->set_thread_state(org_ts);
+        break;
+      }
     }
+
     Self->set_current_pending_monitor(NULL);
 
     // We cleared the pending monitor info since we've just gotten past
@@ -957,24 +957,25 @@ void ObjectMonitor::ReenterI(Thread * Self, ObjectWaiter * SelfNode) {
     if (TryLock(Self) > 0) break;
     if (TrySpin(Self) > 0) break;
 
-    // State transition wrappers around park() ...
-    // ReenterI() wisely defers state transitions until
-    // it's clear we must park the thread.
     {
       OSThreadContendState osts(Self->osthread());
-      ThreadBlockInVM tbivm(jt);
-
-      // cleared by handle_special_suspend_equivalent_condition()
-      // or java_suspend_self()
-      jt->set_suspend_equivalent();
-      Self->_ParkEvent->park();
-
-      // were we externally suspended while we were waiting?
+      JavaThreadState org_ts = jt->thread_state();
       for (;;) {
-        if (!ExitSuspendEquivalent(jt)) break;
-        if (_succ == Self) { _succ = NULL; OrderAccess::fence(); }
-        jt->java_suspend_self();
-        jt->set_suspend_equivalent();
+        jt->frame_anchor()->make_walkable(jt);
+        OrderAccess::storestore();
+        jt->set_thread_state(_thread_blocked);
+        Self->_ParkEvent->park();
+        jt->set_thread_state_fence(_thread_blocked_trans);
+        if (SafepointMechanism::should_process(jt)) {
+          if (_succ == Self) { 
+            _succ = NULL; 
+            OrderAccess::fence(); 
+          }
+          SafepointMechanism::process_if_requested(jt);
+        } else {
+          jt->set_thread_state(org_ts);
+          break;
+        }
       }
     }
 
@@ -1323,41 +1324,6 @@ void ObjectMonitor::exit(bool not_suspended, TRAPS) {
   }
 }
 
-// ExitSuspendEquivalent:
-// A faster alternate to handle_special_suspend_equivalent_condition()
-//
-// handle_special_suspend_equivalent_condition() unconditionally
-// acquires the SR_lock.  On some platforms uncontended MutexLocker()
-// operations have high latency.  Note that in ::enter() we call HSSEC
-// while holding the monitor, so we effectively lengthen the critical sections.
-//
-// There are a number of possible solutions:
-//
-// A.  To ameliorate the problem we might also defer state transitions
-//     to as late as possible -- just prior to parking.
-//     Given that, we'd call HSSEC after having returned from park(),
-//     but before attempting to acquire the monitor.  This is only a
-//     partial solution.  It avoids calling HSSEC while holding the
-//     monitor (good), but it still increases successor reacquisition latency --
-//     the interval between unparking a successor and the time the successor
-//     resumes and retries the lock.  See ReenterI(), which defers state transitions.
-//     If we use this technique we can also avoid EnterI()-exit() loop
-//     in ::enter() where we iteratively drop the lock and then attempt
-//     to reacquire it after suspending.
-//
-// B.  In the future we might fold all the suspend bits into a
-//     composite per-thread suspend flag and then update it with CAS().
-//     Alternately, a Dekker-like mechanism with multiple variables
-//     would suffice:
-//       ST Self->_suspend_equivalent = false
-//       MEMBAR
-//       LD Self_>_suspend_flags
-
-bool ObjectMonitor::ExitSuspendEquivalent(JavaThread * jSelf) {
-  return jSelf->handle_special_suspend_equivalent_condition();
-}
-
-
 void ObjectMonitor::ExitEpilog(Thread * Self, ObjectWaiter * Wakee) {
   assert(owner_raw() == Self, "invariant");
 
@@ -1572,9 +1538,6 @@ void ObjectMonitor::wait(jlong millis, bool interruptible, TRAPS) {
     OSThreadWaitState osts(osthread, true);
     {
       ThreadBlockInVM tbivm(jt);
-      // Thread is in thread_blocked state and oop access is unsafe.
-      jt->set_suspend_equivalent();
-
       if (interrupted || HAS_PENDING_EXCEPTION) {
         // Intentionally empty
       } else if (node._notified == 0) {
@@ -1584,13 +1547,7 @@ void ObjectMonitor::wait(jlong millis, bool interruptible, TRAPS) {
           ret = Self->_ParkEvent->park(millis);
         }
       }
-
-      // were we externally suspended while we were waiting?
-      if (ExitSuspendEquivalent (jt)) {
-        // TODO-FIXME: add -- if succ == Self then succ = null.
-        jt->java_suspend_self();
-      }
-
+      // TODO-FIXME: add -- if succ == Self then succ = null, if suspending on back-edge.
     } // Exit thread safepoint: transition _thread_blocked -> _thread_in_vm
 
     // Node may be on the WaitSet, the EntryList (or cxq), or in transition

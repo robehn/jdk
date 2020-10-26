@@ -94,20 +94,6 @@ inline void Thread::set_threads_hazard_ptr(ThreadsList* new_list) {
   Atomic::release_store_fence(&_threads_hazard_ptr, new_list);
 }
 
-inline void JavaThread::set_ext_suspended() {
-  set_suspend_flag (_ext_suspended);
-}
-inline void JavaThread::clear_ext_suspended() {
-  clear_suspend_flag(_ext_suspended);
-}
-
-inline void JavaThread::set_external_suspend() {
-  set_suspend_flag(_external_suspend);
-}
-inline void JavaThread::clear_external_suspend() {
-  clear_suspend_flag(_external_suspend);
-}
-
 inline void JavaThread::set_pending_async_exception(oop e) {
   _pending_async_exception = e;
   _special_runtime_exit_condition = _async_exception;

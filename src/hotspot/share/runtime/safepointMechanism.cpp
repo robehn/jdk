@@ -77,24 +77,37 @@ void SafepointMechanism::default_initialize() {
 }
 
 void SafepointMechanism::process(JavaThread *thread) {
-  if (global_poll()) {
-    // Any load in ::block must not pass the global poll load.
-    // Otherwise we might load an old safepoint counter (for example).
-    OrderAccess::loadload();
-    SafepointSynchronize::block(thread);
-  }
+  bool did_block;
+  do {
+    did_block = false;
+    if (global_poll()) {
+      // Any load in ::block must not pass the global poll load.
+      // Otherwise we might load an old safepoint counter (for example).
+      OrderAccess::loadload();
+      SafepointSynchronize::block(thread);
+    }
 
-  // The call to on_safepoint fixes the thread's oops and the first few frames.
-  //
-  // The call has been carefully placed here to cater for a few situations:
-  // 1) After we exit from block after a global poll
-  // 2) After a thread races with the disarming of the global poll and transitions from native/blocked
-  // 3) Before the handshake code is run
-  StackWatermarkSet::on_safepoint(thread);
+    // The call to on_safepoint fixes the thread's oops and the first few frames.
+    //
+    // The call has been carefully placed here to cater for a few situations:
+    // 1) After we exit from block after a global poll
+    // 2) After a thread races with the disarming of the global poll and transitions from native/blocked
+    // 3) Before the handshake code is run
+    StackWatermarkSet::on_safepoint(thread);
 
-  if (thread->handshake_state()->should_process()) {
-    thread->handshake_state()->process_by_self();
-  }
+    // The call to on_safepoint fixes the thread's oops and the first few frames.
+    //
+    // The call has been carefully placed here to cater for a few situations:
+    // 1) After we exit from block after a global poll
+    // 2) After a thread races with the disarming of the global poll and transitions from native/blocked
+    // 3) Before the handshake code is run
+    StackWatermarkSet::on_safepoint(thread);
+
+    if (thread->handshake_state()->should_process()) {
+      thread->handshake_state()->process_by_self();
+      did_block = true;
+    }
+  } while(did_block);
 }
 
 uintptr_t SafepointMechanism::compute_poll_word(bool armed, uintptr_t stack_watermark) {

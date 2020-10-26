@@ -378,16 +378,29 @@ HandshakeState::HandshakeState(JavaThread* target) :
 void HandshakeState::add_operation(HandshakeOperation* op) {
   // Adds are done lock free and so is arming.
   // Calling this method with lock held is considered an error.
-  assert(!_lock.owned_by_self(), "Lock should not be held");
   _queue.push(op);
   SafepointMechanism::arm_local_poll_release(_handshakee);
 }
 
+/*class SafepointHandshake : HandshakeClosure {
+ public:
+  SafepointHandshake() : HandshakeClosure("Safepoint") {}
+  void do_thread(Thread* target) {
+    OrderAccess::loadload();
+    SafepointSynchronize::block(thread);
+  }
+};
+
+static SafepointHandshake _sh;
+*/
 HandshakeOperation* HandshakeState::pop_for_self() {
   assert(_handshakee == Thread::current(), "Must be called by self");
   assert(_lock.owned_by_self(), "Lock must be held");
+  //if (SafepointSynchronize::_state != SafepointSynchronize::_not_synchronized) {
+  //   return &_sh;
+  //}
   return _queue.pop();
-};
+}
 
 static bool non_self_queue_filter(HandshakeOperation* op) {
   return !op->is_async();
@@ -431,6 +444,7 @@ void HandshakeState::process_self_inner() {
       if (async) {
         log_handshake_info(((AsyncHandshakeOperation*)op)->start_time(), op->name(), 1, 0, "asynchronous");
         delete op;
+        return; // Must check for safepoints
       }
     }
   }
@@ -538,4 +552,33 @@ HandshakeState::ProcessResult HandshakeState::try_process(HandshakeOperation* ma
                        p2i(current_thread), executed, p2i(_handshakee),
                        pr_ret == HandshakeState::_succeeded ? "including" : "excluding", p2i(match_op));
   return pr_ret;
+}
+  
+void HandshakeState::suspend_in_handshake() {
+  assert(Thread::current() == _handshakee, "should call from _handshakee");
+  assert(_lock.owned_by_self(), "Lock must be held");
+  JavaThreadState jts = _handshakee->thread_state();
+  while (_handshakee->_suspended) {
+    _handshakee->set_thread_state(_thread_blocked);
+    _lock.wait_without_safepoint_check();
+  }
+  _handshakee->set_thread_state(jts);
+  _handshakee->set_suspend_requested(false);
+}
+
+bool HandshakeState::resume() {
+  if (!_handshakee->is_suspend_requested()) {
+    log_trace(thread, suspend)("JavaThread:" INTPTR_FORMAT ", early check, not suspended, failed resume", p2i(_handshakee));
+    return false;
+  }
+  MutexLocker ml(&_lock, Mutex::_no_safepoint_check_flag);
+  if (!_handshakee->is_suspend_requested()) {
+    assert(!_handshakee->is_suspended(), "cannot not be suspended without a suspend request");
+    log_trace(thread, suspend)("JavaThread:" INTPTR_FORMAT " not suspended, failed resume", p2i(_handshakee));
+    return false;
+  }
+  _handshakee->set_suspend(false);
+  _lock.notify();
+  log_trace(thread, suspend)("JavaThread:" INTPTR_FORMAT " resumed", p2i(_handshakee));
+  return true;
 }

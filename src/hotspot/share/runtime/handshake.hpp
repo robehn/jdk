@@ -75,7 +75,7 @@ class HandshakeState {
   // The queue containing handshake operations to be performed on _handshakee.
   FilterQueue<HandshakeOperation*> _queue;
   // Provides mutual exclusion to this state and queue.
-  Mutex   _lock;
+  Monitor  _lock;
   // Set to the thread executing the handshake operation.
   Thread* _active_handshaker;
 
@@ -88,6 +88,7 @@ class HandshakeState {
   HandshakeOperation* pop_for_self();
   HandshakeOperation* pop();
 
+
  public:
   HandshakeState(JavaThread* thread);
 
@@ -95,6 +96,7 @@ class HandshakeState {
 
   bool has_operation() {
     return !_queue.is_empty();
+    //return !_queue.is_empty() || (SafepointSynchronize::_state != SafepointSynchronize::_not_synchronized);
   }
 
   // Both _queue and _lock must be checked. If a thread has seen this _handshakee
@@ -121,6 +123,9 @@ class HandshakeState {
   ProcessResult try_process(HandshakeOperation* match_op);
 
   Thread* active_handshaker() const { return _active_handshaker; }
+
+  void suspend_in_handshake();
+  bool resume();
 };
 
 #endif // SHARE_RUNTIME_HANDSHAKE_HPP
