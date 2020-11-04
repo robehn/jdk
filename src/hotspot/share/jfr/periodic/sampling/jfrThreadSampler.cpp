@@ -51,14 +51,9 @@ static bool thread_state_in_java(JavaThread* thread) {
   switch(thread->thread_state()) {
     case _thread_new:
     case _thread_uninitialized:
-    case _thread_new_trans:
-    case _thread_in_vm_trans:
-    case _thread_blocked_trans:
-    case _thread_in_native_trans:
     case _thread_blocked:
     case _thread_in_vm:
     case _thread_in_native:
-    case _thread_in_Java_trans:
       break;
     case _thread_in_Java:
       return true;
@@ -74,14 +69,9 @@ static bool thread_state_in_native(JavaThread* thread) {
   switch(thread->thread_state()) {
     case _thread_new:
     case _thread_uninitialized:
-    case _thread_new_trans:
-    case _thread_blocked_trans:
     case _thread_blocked:
     case _thread_in_vm:
-    case _thread_in_vm_trans:
-    case _thread_in_Java_trans:
     case _thread_in_Java:
-    case _thread_in_native_trans:
       break;
     case _thread_in_native:
       return true;

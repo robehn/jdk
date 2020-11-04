@@ -1086,8 +1086,7 @@ address TemplateInterpreterGenerator::generate_native_entry(bool synchronized) {
 
   // change thread state
   NOT_LP64(__ get_thread(thread));
-  __ movl(Address(thread, JavaThread::thread_state_offset()),
-          _thread_in_native_trans);
+  __ movl(Address(thread, JavaThread::thread_state_offset()), _thread_in_Java);
 
   // Force this write out before the read below
   __ membar(Assembler::Membar_mask_bits(

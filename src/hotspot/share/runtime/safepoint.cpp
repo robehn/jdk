@@ -690,6 +690,7 @@ bool SafepointSynchronize::handshake_safe(JavaThread *thread) {
 
 void SafepointSynchronize::block(JavaThread *thread) {
   assert(thread != NULL, "thread must be set");
+  assert(thread->thread_state() == _thread_in_vm, "invariant");
 
   // Threads shouldn't block if they are in the middle of printing, but...
   ttyLocker::break_tty_lock_for_safepoint(os::current_thread_id());
@@ -708,42 +709,30 @@ void SafepointSynchronize::block(JavaThread *thread) {
   thread->frame_anchor()->make_walkable(thread);
 
   uint64_t safepoint_id = SafepointSynchronize::safepoint_counter();
-  // Check that we have a valid thread_state at this point
-  switch(state) {
-    case _thread_in_vm_trans:
-    case _thread_in_Java:        // From compiled code
-    case _thread_in_native_trans:
-    case _thread_blocked_trans:
-    case _thread_new_trans:
 
-      // We have no idea where the VMThread is, it might even be at next safepoint.
-      // So we can miss this poll, but stop at next.
+  // We have no idea where the VMThread is, it might even be at next safepoint.
+  // So we can miss this poll, but stop at next.
 
-      // Load dependent store, it must not pass loading of safepoint_id.
-      thread->safepoint_state()->set_safepoint_id(safepoint_id); // Release store
+  // Load dependent store, it must not pass loading of safepoint_id.
+  thread->safepoint_state()->set_safepoint_id(safepoint_id); // Release store
 
-      // This part we can skip if we notice we miss or are in a future safepoint.
-      OrderAccess::storestore();
-      // Load in wait barrier should not float up
-      thread->set_thread_state_fence(_thread_blocked);
+  // This part we can skip if we notice we miss or are in a future safepoint.
+  OrderAccess::storestore();
+  // Load in wait barrier should not float up
+  thread->set_thread_state_fence(_thread_blocked);
 
-      _wait_barrier->wait(static_cast<int>(safepoint_id));
-      assert(_state != _synchronized, "Can't be");
+  _wait_barrier->wait(static_cast<int>(safepoint_id));
+  assert(_state != _synchronized, "Can't be");
 
-      // If barrier is disarmed stop store from floating above loads in barrier.
-      OrderAccess::loadstore();
-      thread->set_thread_state(state);
+  // If barrier is disarmed stop store from floating above loads in barrier.
+  OrderAccess::loadstore();
+  thread->set_thread_state(state);
 
-      // Then we reset the safepoint id to inactive.
-      thread->safepoint_state()->reset_safepoint_id(); // Release store
+  // Then we reset the safepoint id to inactive.
+  thread->safepoint_state()->reset_safepoint_id(); // Release store
 
-      OrderAccess::fence();
+  OrderAccess::fence();
 
-      break;
-
-    default:
-     fatal("Illegal threadstate encountered: %d", state);
-  }
   guarantee(thread->safepoint_state()->get_safepoint_id() == InactiveSafepointCounter,
             "The safepoint id should be set only in block path");
 
@@ -756,15 +745,15 @@ void SafepointSynchronize::block(JavaThread *thread) {
 
 
 void SafepointSynchronize::handle_polling_page_exception(JavaThread *thread) {
-  assert(thread->thread_state() == _thread_in_Java, "should come from Java code");
+  ThreadSafepointState* state = thread->safepoint_state();
+  state->set_at_poll_safepoint(true);
 
   if (log_is_enabled(Info, safepoint, stats)) {
     Atomic::inc(&_nof_threads_hit_polling_page);
   }
-
-  ThreadSafepointState* state = thread->safepoint_state();
-
   state->handle_polling_page_exception();
+  
+  state->set_at_poll_safepoint(false);
 }
 
 
@@ -942,7 +931,9 @@ void ThreadSafepointState::handle_polling_page_exception() {
     StackWatermarkSet::after_unwind(self);
 
     // Process pending operation
-    SafepointMechanism::process_if_requested_with_exit_check(self, true /* check asyncs */);
+    {
+      ThreadInVMfromJava tivfj(self);
+    }
 
     // restore oop result, if any
     if (return_oop) {
@@ -956,21 +947,27 @@ void ThreadSafepointState::handle_polling_page_exception() {
     // verify the blob built the "return address" correctly
     assert(real_return_addr == caller_fr.pc(), "must match");
 
-    set_at_poll_safepoint(true);
     // Process pending operation
     // We never deliver an async exception at a polling point as the
     // compiler may not have an exception handler for it. The polling
     // code will notice the pending async exception, deoptimize and
     // the exception will be delivered. (Polling at a return point
     // is ok though). Sure is a lot of bother for a deprecated feature...
-    SafepointMechanism::process_if_requested_with_exit_check(self, false /* check asyncs */);
-    set_at_poll_safepoint(false);
+    // If we are at a polling page safepoint (not a poll return)
+    // then we must defer async exception because live registers
+    // will be clobbered by the exception path. Poll return is
+    // ok because the call we a returning from already collides
+    // with exception handling registers and so there is no issue.
+    // (The exception handling path kills call result registers but
+    //  this is ok since the exception kills the result anyway).
 
-    // If we have a pending async exception deoptimize the frame
-    // as otherwise we may never deliver it.
-    if (self->has_async_condition()) {
-      ThreadInVMfromJavaNoAsyncException __tiv(self);
-      Deoptimization::deoptimize_frame(self, caller_fr.id());
+    {
+      ThreadInVMfromJavaNoAsyncException tivfj(self);
+      // If we have a pending async exception deoptimize the frame
+      // as otherwise we may never deliver it.
+      if (self->has_async_condition()) {
+        Deoptimization::deoptimize_frame(self, caller_fr.id());
+      }
     }
 
     // If an exception has been installed we must check for a pending deoptimization

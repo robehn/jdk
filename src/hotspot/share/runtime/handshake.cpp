@@ -408,10 +408,9 @@ HandshakeOperation* HandshakeState::pop() {
 void HandshakeState::process_by_self() {
   assert(Thread::current() == _handshakee, "should call from _handshakee");
   assert(!_handshakee->is_terminated(), "should not be a terminated thread");
-  assert(_handshakee->thread_state() != _thread_blocked, "should not be in a blocked state");
-  assert(_handshakee->thread_state() != _thread_in_native, "should not be in native");
-  ThreadInVMForHandshake tivm(_handshakee);
+  assert(_handshakee->thread_state() == _thread_in_vm, "should not be in a blocked state");
   {
+    ttyLocker::break_tty_lock_for_safepoint(os::current_thread_id());
     NoSafepointVerifier nsv;
     process_self_inner();
   }
