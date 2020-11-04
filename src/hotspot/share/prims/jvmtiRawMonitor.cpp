@@ -241,7 +241,6 @@ int JvmtiRawMonitor::simple_wait(Thread* self, jlong millis) {
         ret = M_INTERRUPTED;
     } else {
       ThreadBlockInVM tbivm(jt);
-      jt->set_suspend_equivalent();
       if (millis <= 0) {
         self->_ParkEvent->park();
       } else {
@@ -262,6 +261,9 @@ int JvmtiRawMonitor::simple_wait(Thread* self, jlong millis) {
 
   dequeue_waiter(node);
 
+  if (self->is_Java_thread()) {
+    guarantee(self->as_Java_thread()->thread_state() == _thread_in_native, "invariant");
+  }
   simple_enter(self);
   guarantee(_owner == self, "invariant");
   guarantee(_recursions == 0, "invariant");
@@ -307,7 +309,7 @@ void JvmtiRawMonitor::simple_notify(Thread* self, bool all) {
   return;
 }
 
-// Any JavaThread will enter here with state _thread_blocked
+// Any JavaThread will enter here with state _thread_blocked, but sometimes not
 void JvmtiRawMonitor::raw_enter(Thread* self) {
   void* contended;
   JavaThread* jt = NULL;
@@ -315,15 +317,20 @@ void JvmtiRawMonitor::raw_enter(Thread* self) {
   // surprise the suspender if a "suspended" thread can still enter monitor
   if (self->is_Java_thread()) {
     jt = self->as_Java_thread();
-    jt->SR_lock()->lock_without_safepoint_check();
-    while (jt->is_external_suspend()) {
-      jt->SR_lock()->unlock();
-      jt->java_suspend_self();
-      jt->SR_lock()->lock_without_safepoint_check();
+    JavaThreadState org_ts = jt->thread_state();
+    while (true) {
+      jt->handshake_state()->lock();
+      if (!jt->is_suspend_requested()) {
+        contended = Atomic::cmpxchg(&_owner, (Thread*)NULL, jt);
+        jt->handshake_state()->unlock();
+        break;
+      }
+      jt->handshake_state()->unlock();
+
+      jt->set_thread_state_fence(_thread_in_vm);
+      SafepointMechanism::process_if_requested(jt);
+      jt->set_thread_state(org_ts);      
     }
-    // guarded by SR_lock to avoid racing with new external suspend requests.
-    contended = Atomic::cmpxchg(&_owner, (Thread*)NULL, jt);
-    jt->SR_lock()->unlock();
   } else {
     contended = Atomic::cmpxchg(&_owner, (Thread*)NULL, self);
   }
@@ -346,26 +353,15 @@ void JvmtiRawMonitor::raw_enter(Thread* self) {
   } else {
     guarantee(jt->thread_state() == _thread_blocked, "invariant");
     for (;;) {
-      jt->set_suspend_equivalent();
-      // cleared by handle_special_suspend_equivalent_condition() or
-      // java_suspend_self()
       simple_enter(jt);
-
-      // were we externally suspended while we were waiting?
-      if (!jt->handle_special_suspend_equivalent_condition()) {
+      jt->set_thread_state_fence(_thread_in_vm);
+      if (!SafepointMechanism::should_process(jt)) {
+        jt->set_thread_state(_thread_blocked);
         break;
       }
-
-      // This thread was externally suspended
-      // We have reentered the contended monitor, but while we were
-      // waiting another thread suspended us. We don't want to reenter
-      // the monitor while suspended because that would surprise the
-      // thread that suspended us.
-      //
-      // Drop the lock
       simple_exit(jt);
-
-      jt->java_suspend_self();
+      SafepointMechanism::process_if_requested(jt);
+      jt->set_thread_state(_thread_blocked);
     }
   }
 
@@ -412,28 +408,18 @@ int JvmtiRawMonitor::raw_wait(jlong millis, Thread* self) {
   if (self->is_Java_thread()) {
     JavaThread* jt = self->as_Java_thread();
     for (;;) {
-      jt->set_suspend_equivalent();
-      if (!jt->handle_special_suspend_equivalent_condition()) {
-        break;
-      } else {
-        // We've been suspended whilst waiting and so we have to
-        // relinquish the raw monitor until we are resumed. Of course
-        // after reacquiring we have to re-check for suspension again.
-        // Suspension requires we are _thread_blocked, and we also have to
-        // recheck for being interrupted.
-        simple_exit(jt);
-        {
-          ThreadInVMfromNative tivm(jt);
-          {
-            ThreadBlockInVM tbivm(jt);
-            jt->java_suspend_self();
-          }
-          if (jt->is_interrupted(true)) {
-            ret = M_INTERRUPTED;
-          }
-        }
-        simple_enter(jt);
+      jt->set_thread_state_fence(_thread_in_vm);
+      if (!SafepointMechanism::should_process(jt)) {
+          jt->set_thread_state(_thread_in_native);
+          break;
       }
+      simple_exit(jt);
+      SafepointMechanism::process_if_requested(jt);
+      if (jt->is_interrupted(true)) {
+        ret = M_INTERRUPTED;
+      }
+      jt->set_thread_state(_thread_in_native);
+      simple_enter(jt);
     }
     guarantee(jt == _owner, "invariant");
   } else {

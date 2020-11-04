@@ -312,8 +312,6 @@ class JvmtiThreadState : public CHeapObj<mtInternal> {
 
  public:
 
-  bool may_be_walked();
-
   // Thread local event collector setter and getter methods.
   JvmtiDynamicCodeEventCollector* get_dynamic_code_event_collector() {
     return _dynamic_code_event_collector;

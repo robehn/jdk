@@ -227,10 +227,8 @@ class Monitor : public Mutex {
 
   // Wait until monitor is notified (or times out).
   // Defaults are to make safepoint checks, wait time is forever (i.e.,
-  // zero), and not a suspend-equivalent condition. Returns true if wait
-  // times out; otherwise returns false.
-  bool wait(int64_t timeout = 0,
-            bool as_suspend_equivalent = !_as_suspend_equivalent_flag);
+  // zero). Returns true if wait times out; otherwise returns false.
+  bool wait(int64_t timeout = 0);
   bool wait_without_safepoint_check(int64_t timeout = 0);
   void notify();
   void notify_all();

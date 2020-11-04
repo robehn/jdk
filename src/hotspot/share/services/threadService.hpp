@@ -197,7 +197,7 @@ private:
   OopHandle   _threadObj;
   JavaThreadStatus _thread_status;
 
-  bool    _is_ext_suspended;
+  bool    _is_suspended;
   bool    _is_in_native;
 
   jlong   _contended_enter_ticks;
@@ -230,7 +230,7 @@ public:
 
   void        set_next(ThreadSnapshot* n) { _next = n; }
 
-  bool        is_ext_suspended()          { return _is_ext_suspended; }
+  bool        is_suspended()              { return _is_suspended; }
   bool        is_in_native()              { return _is_in_native; }
 
   jlong       contended_enter_count()     { return _contended_enter_count; }

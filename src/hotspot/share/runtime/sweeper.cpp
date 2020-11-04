@@ -265,16 +265,9 @@ void NMethodSweeper::force_sweep() {
  * Handle a safepoint request
  */
 void NMethodSweeper::handle_safepoint_request() {
+  MutexUnlocker mu(CodeCache_lock, Mutex::_no_safepoint_check_flag);
   JavaThread* thread = JavaThread::current();
-  if (SafepointMechanism::should_process(thread)) {
-    if (PrintMethodFlushing && Verbose) {
-      tty->print_cr("### Sweep at %d out of %d, yielding to safepoint", _seen, CodeCache::nmethod_count());
-    }
-    MutexUnlocker mu(CodeCache_lock, Mutex::_no_safepoint_check_flag);
-
-    ThreadBlockInVM tbivm(thread);
-    thread->java_suspend_self();
-  }
+  SafepointMechanism::process_if_requested(thread);
 }
 
 void NMethodSweeper::sweep() {
