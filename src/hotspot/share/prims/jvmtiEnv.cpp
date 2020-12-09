@@ -943,14 +943,18 @@ jvmtiError
 JvmtiEnv::SuspendThread(JavaThread* java_thread) {
   // don't allow hidden thread suspend request.
   if (java_thread->is_hidden_from_external_view()) {
-    return (JVMTI_ERROR_NONE);
+    return JVMTI_ERROR_NONE;
   }
   if (java_thread->is_suspended()) {
-    return (JVMTI_ERROR_THREAD_SUSPENDED);
+    return JVMTI_ERROR_THREAD_SUSPENDED;
   }
   if (!JvmtiSuspendControl::suspend(java_thread)) {
+    // Either thread already suspended or
     // the thread was in the process of exiting
-    return (JVMTI_ERROR_THREAD_NOT_ALIVE);
+    if (java_thread->is_exiting()) {
+      return JVMTI_ERROR_THREAD_NOT_ALIVE;
+    }
+    return JVMTI_ERROR_THREAD_SUSPENDED;
   }
   return JVMTI_ERROR_NONE;
 } /* end SuspendThread */
@@ -976,12 +980,16 @@ JvmtiEnv::SuspendThreadList(jint request_count, const jthread* request_list, jvm
       results[i] = JVMTI_ERROR_NONE;  // indicate successful suspend
       continue;
     }
+    if (java_thread->is_suspended()) {
+      results[i] = JVMTI_ERROR_THREAD_SUSPENDED;  // indicate successful suspend
+      continue;
+    }
     if (java_thread == JavaThread::current()) {
       self_index = i;
       continue;
     }
     if (!JvmtiSuspendControl::suspend(java_thread)) {
-      results[i] = JVMTI_ERROR_THREAD_NOT_ALIVE;
+      results[i] = JVMTI_ERROR_THREAD_SUSPENDED; // JVMTI_ERROR_THREAD_NOT_ALIVE;
       continue;
     }
     results[i] = JVMTI_ERROR_NONE;  // indicate successful suspend
@@ -1002,10 +1010,12 @@ JvmtiEnv::SuspendThreadList(jint request_count, const jthread* request_list, jvm
 // java_thread - pre-checked
 jvmtiError
 JvmtiEnv::ResumeThread(JavaThread* java_thread) {
-  log_error(os)("JvmtiEnv::ResumeThread: " INTPTR_FORMAT, p2i(java_thread));
   // don't allow hidden thread resume request.
   if (java_thread->is_hidden_from_external_view()) {
     return JVMTI_ERROR_NONE;
+  }
+  if (!java_thread->is_suspended()) {
+    return JVMTI_ERROR_THREAD_NOT_SUSPENDED;
   }
   if (!JvmtiSuspendControl::resume(java_thread)) {
     return JVMTI_ERROR_INTERNAL;
@@ -3178,12 +3188,24 @@ JvmtiEnv::RawMonitorEnter(JvmtiRawMonitor * rmonitor) {
     if (thread->is_Java_thread()) {
       JavaThread* current_thread = thread->as_Java_thread();
 
+      /* Transition to thread_blocked without entering vm state          */
+      /* This is really evil. Normally you can't undo _thread_blocked    */
+      /* transitions like this because it would cause us to miss a       */
+      /* safepoint but since the thread was already in _thread_in_native */
+      /* the thread is not leaving a safepoint safe state and it will    */
+      /* block when it tries to return from native. We can't safepoint   */
+      /* block in here because we could deadlock the vmthread. Blech.    */
+
       JavaThreadState state = current_thread->thread_state();
       assert(state == _thread_in_native, "Must be _thread_in_native");
       // frame should already be walkable since we are in native
       assert(!current_thread->has_last_Java_frame() ||
              current_thread->frame_anchor()->walkable(), "Must be walkable");
+      current_thread->set_thread_state(_thread_blocked);
+
       rmonitor->raw_enter(current_thread);
+      // restore state, still at a safepoint safe state
+      current_thread->set_thread_state(state);
     } else {
       rmonitor->raw_enter(thread);
     }

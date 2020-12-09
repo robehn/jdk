@@ -1434,6 +1434,7 @@ JavaThread::JavaThread() :
   _frames_to_pop_failed_realloc(0),
 
   _handshake(this),
+  _java_trans(false),
 
   _suspended(false),
   _suspend_requested(false),
@@ -1623,7 +1624,7 @@ JavaThread::~JavaThread() {
     FREE_C_HEAP_ARRAY(jlong, _jvmci_counters);
   }
 #endif // INCLUDE_JVMCI
-  
+
   // SR_handler uses this as a termination indicator -
   // needs to happen before os::free_thread()
   delete _util_lock;
@@ -1791,8 +1792,10 @@ void JavaThread::exit(bool destroy_vm, ExitType exit_type) {
       JvmtiExport::post_thread_end(this);
     }
     
-    set_terminated(_thread_exiting);
+    set_in_java_transition();
+    _handshake.thread_exit();
     ThreadService::current_thread_exiting(this, is_daemon(threadObj()));
+    clear_in_java_transition();
 
   } else {
     assert(!is_terminated() && !is_exiting(), "must not be exiting");
@@ -2085,13 +2088,16 @@ void JavaThread::send_thread_stop(oop java_throwable)  {
   java_lang_Thread::set_interrupted(threadObj(), true);
   this->interrupt();
 }
-  
+
 class ThreadSuspensionHandshake : public AsyncHandshakeClosure {
  public:
   ThreadSuspensionHandshake() : AsyncHandshakeClosure("ThreadSuspension") {}
   void do_thread(Thread* thr) {
     JavaThread* target = thr->as_Java_thread();
     target->handshake_state()->suspend_in_handshake();
+  }
+  bool can_be_executed(JavaThread* thr) {
+    return thr->is_in_java_transition();
   }
 };
 
@@ -2101,7 +2107,7 @@ public:
   SuspendThreadHandshake() : HandshakeClosure("SuspendThread"), _did_suspend(false) {}
   void do_thread(Thread* thr) {
     JavaThread* target = thr->as_Java_thread();
-    if(target->is_exiting() || 
+    if(target->is_exiting() ||
        target->threadObj() == NULL) {
       log_trace(thread, suspend)("JavaThread:" INTPTR_FORMAT " exiting", p2i(target));
       return;
@@ -2127,6 +2133,7 @@ public:
     // from this point.
     target->set_suspend(true);
     _did_suspend = true;
+    target->set_suspend_requested(true);
     log_trace(thread, suspend)("JavaThread:" INTPTR_FORMAT " suspened, arming ThreadSuspension", p2i(target));
     ThreadSuspensionHandshake* ts = new ThreadSuspensionHandshake();
     Handshake::execute(ts, target);
@@ -2137,6 +2144,7 @@ public:
 bool JavaThread::java_suspend() {
   ThreadsListHandle tlh;
   if (!tlh.includes(this)) {
+    log_trace(thread, suspend)("JavaThread:" INTPTR_FORMAT " not on threadslist, no suspension", p2i(this));
     return false;
   }
   SuspendThreadHandshake st;
@@ -2147,6 +2155,7 @@ bool JavaThread::java_suspend() {
 bool JavaThread::java_resume() {
   ThreadsListHandle tlh;
   if (!tlh.includes(this)) {
+    log_trace(thread, suspend)("JavaThread:" INTPTR_FORMAT " not on threadslist, nothing to resume", p2i(this));
     return false;
   }
   return this->handshake_state()->resume();
@@ -3758,7 +3767,7 @@ bool Threads::destroy_vm() {
   _vm_complete = false;
 #endif
   // Wait until we are the last non-daemon thread to execute
-  { 
+  {
     MonitorLocker nu(Threads_lock);
     while (Threads::number_of_non_daemon_threads() > 1)
       // This wait should make safepoint checks, wait without a timeout.
@@ -3933,7 +3942,7 @@ void Threads::remove(JavaThread* p, bool is_daemon) {
     // the thread might mess around with locks after this point. This can cause it
     // to do callbacks into the safepoint code. However, the safepoint code is not aware
     // of this thread since it is removed from the queue.
-    p->set_terminated_value();
+    p->set_terminated();
 
     // Notify threads waiting in EscapeBarriers
     EscapeBarrier::thread_removed(p);

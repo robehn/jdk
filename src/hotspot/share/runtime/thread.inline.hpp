@@ -168,13 +168,8 @@ inline bool JavaThread::is_terminated() const {
   return check_is_terminated(l_terminated);
 }
 
-inline void JavaThread::set_terminated(TerminatedTypes t) {
-  // use release-store so the setting of _terminated is seen more quickly
-  Atomic::release_store((volatile jint *) &_terminated, (jint) t);
-}
-
 // special for Threads::remove() which is static:
-inline void JavaThread::set_terminated_value() {
+inline void JavaThread::set_terminated() {
   // use release-store so the setting of _terminated is seen more quickly
   Atomic::release_store((volatile jint *) &_terminated, (jint) _thread_terminated);
 }

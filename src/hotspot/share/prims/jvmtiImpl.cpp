@@ -764,15 +764,12 @@ VM_GetReceiver::VM_GetReceiver(
 //
 
 bool JvmtiSuspendControl::suspend(JavaThread *java_thread) {
-  bool sus = java_thread->java_suspend();
-  return sus;
+  return java_thread->java_suspend();
 }
 
 bool JvmtiSuspendControl::resume(JavaThread *java_thread) {
-  bool res = java_thread->java_resume();
-  return res;
+  return java_thread->java_resume();
 }
-
 
 void JvmtiSuspendControl::print() {
 #ifndef PRODUCT

@@ -927,11 +927,7 @@ JVMCI::CodeInstallResult CodeInstaller::initialize_buffer(CodeBuffer& buffer, bo
     }
     last_pc_offset = pc_offset;
 
-    JavaThread* thread = JavaThread::current();
-    if (SafepointMechanism::should_process(thread)) {
-      // this is a hacky way to force a safepoint check but nothing else was jumping out at me.
-      ThreadToNativeFromVM ttnfv(thread);
-    }
+    SafepointMechanism::process_if_requested(JavaThread::current());
   }
 
 #ifndef PRODUCT

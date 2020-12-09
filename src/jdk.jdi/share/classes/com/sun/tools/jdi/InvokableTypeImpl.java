@@ -113,6 +113,7 @@ abstract class InvokableTypeImpl extends ReferenceTypeImpl {
             ret = waitForReply(stream);
         } catch (JDWPException exc) {
             if (exc.errorCode() == JDWP.Error.INVALID_THREAD) {
+                exc.printStackTrace();
                 throw new IncompatibleThreadStateException();
             } else {
                 throw exc.toJDIException();

@@ -60,28 +60,24 @@ bool SafepointMechanism::global_poll() {
   return (SafepointSynchronize::_state != SafepointSynchronize::_not_synchronized);
 }
 
-bool SafepointMechanism::local_poll(Thread* thread) {
-  if (thread->is_Java_thread()) {
-    return local_poll_armed(thread->as_Java_thread());
-  } else {
-    // If the poll is on a non-java thread we can only check the global state.
-    return global_poll();
+bool SafepointMechanism::should_process(JavaThread* thread, bool proc_suspend) {
+  if (!local_poll_armed(thread)) {
+    return false;
   }
+  return should_process_slow(thread, proc_suspend);
 }
 
-bool SafepointMechanism::should_process(Thread* thread) {
-  return local_poll(thread);
-}
-
-void SafepointMechanism::process_if_requested(JavaThread *thread) {
+void SafepointMechanism::process_if_requested(JavaThread *thread, bool proc_suspend) {
   if (!local_poll_armed(thread)) {
     return;
   }
+  if (proc_suspend) thread->set_in_java_transition();
   process_if_requested_slow(thread);
+  if (proc_suspend) thread->clear_in_java_transition();
 }
 
 void SafepointMechanism::process_if_requested_with_exit_check(JavaThread* thread, bool check_asyncs) {
-  process_if_requested(thread);
+  process_if_requested(thread, true);
   if (thread->has_special_runtime_exit_condition()) {
     thread->handle_special_runtime_exit_condition(check_asyncs);
   }

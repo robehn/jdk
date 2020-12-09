@@ -52,7 +52,6 @@ public class JavaThread extends Thread {
   private static AddressField  stackBaseField;
   private static CIntegerField stackSizeField;
   private static CIntegerField terminatedField;
-  private static CIntegerField suspendField;
 
   private static JavaThreadPDAccess access;
 

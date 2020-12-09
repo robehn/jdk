@@ -47,7 +47,7 @@ class VMConnection {
      * These are read from TESTVMOPTS and/or TESTJAVAOPTS.
      */
     static public String getDebuggeeVMOptions() {
-        String retVal = "";
+        String retVal = "-Xlog:all=error:debugee.log ";
 
         // When we run under jtreg, test.classes contains the pathname of
         // the dir in which the .class files will be placed.

@@ -230,7 +230,7 @@ public:
 
   void        set_next(ThreadSnapshot* n) { _next = n; }
 
-  bool        is_suspended()          { return _is_suspended; }
+  bool        is_suspended()              { return _is_suspended; }
   bool        is_in_native()              { return _is_in_native; }
 
   jlong       contended_enter_count()     { return _contended_enter_count; }

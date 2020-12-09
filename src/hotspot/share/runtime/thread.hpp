@@ -1039,7 +1039,7 @@ class JavaThread: public Thread {
   // _vm_exited is a special value to cover the case of a JavaThread
   // executing native code after the VM itself is terminated.
   volatile TerminatedTypes _terminated;
-  
+
   // suspend/resume support
   jint                  _in_deopt_handler;       // count of deoptimization
                                                  // handlers thread is in
@@ -1240,9 +1240,10 @@ class JavaThread: public Thread {
     return l_terminated != _not_terminated && l_terminated != _thread_exiting;
   }
   bool is_terminated() const;
-  void set_terminated(TerminatedTypes t);
+  void set_exiting() { _terminated = _thread_exiting; }
+  void set_vm_exited() { _terminated = _vm_exited; };
   // special for Threads::remove() which is static:
-  void set_terminated_value();
+  void set_terminated();
   void block_if_vm_exited();
 
   bool doing_unsafe_access()                     { return _doing_unsafe_access; }
@@ -1258,6 +1259,7 @@ class JavaThread: public Thread {
  private:
   // Support for thread handshake operations
   HandshakeState _handshake;
+  bool _java_trans;
  public:
   HandshakeState* handshake_state() { return &_handshake; }
 
@@ -1267,6 +1269,10 @@ class JavaThread: public Thread {
     return _handshake.active_handshaker() == th || this == th;
   }
 
+  void set_in_java_transition()   { _java_trans = true; }
+  void clear_in_java_transition() { _java_trans = false;}
+  bool is_in_java_transition()    { return _java_trans;  }
+
   // Suspend/resume support for JavaThread
  private:
   bool _suspended;
@@ -1275,12 +1281,12 @@ class JavaThread: public Thread {
  public:
   bool java_suspend(); // higher-level suspension logic called by the public APIs
   bool java_resume();  // higher-level resume logic called by the public APIs
-  
+
   bool is_suspended() { return Atomic::load(&_suspended); }
   void set_suspend(bool to) { return Atomic::store(&_suspended, to); }
-  
-  bool is_suspend_requested() { return Atomic::load(&_suspended); }
-  void set_suspend_requested(bool to) { return Atomic::store(&_suspended, to); }
+
+  bool is_suspend_requested() { return Atomic::load(&_suspend_requested); }
+  void set_suspend_requested(bool to) { return Atomic::store(&_suspend_requested, to); }
 
   Mutex* UtilLock() { return _util_lock; }
   Mutex* _util_lock;
@@ -1289,13 +1295,13 @@ class JavaThread: public Thread {
   static void check_safepoint_and_suspend_for_native_trans(JavaThread *thread);
   // Check for async exception in addition to safepoint and suspend request.
   static void check_special_condition_for_native_trans(JavaThread *thread);
-  
+
   // Whenever a thread transitions from native to vm/java it must suspend
   // if external|deopt suspend is present.
   bool is_suspend_after_native() const {
     return (_suspend_flags & (_obj_deopt JFR_ONLY(| _trace_flag))) != 0;
   }
-  
+
   // Synchronize with another thread that is deoptimizing objects of the
   // current thread, i.e. reverts optimizations based on escape analysis.
   void wait_for_object_deoptimization();
@@ -1319,8 +1325,7 @@ class JavaThread: public Thread {
   // Return true if JavaThread has an asynchronous condition or
   // if external suspension is requested.
   bool has_special_runtime_exit_condition() {
-    return (_special_runtime_exit_condition != _no_async_condition) ||
-            is_obj_deopt_suspend();
+    return (_special_runtime_exit_condition != _no_async_condition) || is_trace_suspend() || is_obj_deopt_suspend();
   }
 
   void set_pending_unsafe_access_error()          { _special_runtime_exit_condition = _async_unsafe_access_error; }

@@ -50,6 +50,8 @@ class SafepointMechanism : public AllStatic {
   static inline bool local_poll(Thread* thread);
   static inline bool global_poll();
 
+  static bool should_process_slow(JavaThread* thread, bool proc_suspend);
+  
   static void process(JavaThread *thread);
   static void process_if_requested_slow(JavaThread *thread);
 
@@ -79,10 +81,10 @@ public:
   };
 
   // Call this method to see if this thread should block for a safepoint or process handshake.
-  static inline bool should_process(Thread* thread);
+  static inline bool should_process(JavaThread* thread, bool proc_suspend = false);
 
   // Processes a pending requested operation.
-  static inline void process_if_requested(JavaThread* thread);
+  static inline void process_if_requested(JavaThread* thread, bool proc_suspend = false);
   static inline void process_if_requested_with_exit_check(JavaThread* thread, bool check_asyncs);
   // Compute what the poll values should be and install them.
   static void update_poll_values(JavaThread* thread);

@@ -138,8 +138,8 @@ public class CountFilterTest extends TestScaffold {
             ThreadReference tr = (ThreadReference)it.next();
             if (!tr.equals(mainThread)) {
                 otherThread = tr;
-                break;
             }
+            System.out.println("Other threads:" + tr.name());
         }
         if (otherThread == null) {
             throw new Exception("test error: couldn't find " +

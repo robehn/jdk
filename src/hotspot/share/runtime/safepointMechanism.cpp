@@ -77,9 +77,9 @@ void SafepointMechanism::default_initialize() {
 }
 
 void SafepointMechanism::process(JavaThread *thread) {
-  bool did_block;
+  bool need_rechecking;
   do {
-    did_block = false;
+    need_rechecking = false;
     if (global_poll()) {
       // Any load in ::block must not pass the global poll load.
       // Otherwise we might load an old safepoint counter (for example).
@@ -95,19 +95,12 @@ void SafepointMechanism::process(JavaThread *thread) {
     // 3) Before the handshake code is run
     StackWatermarkSet::on_safepoint(thread);
 
-    // The call to on_safepoint fixes the thread's oops and the first few frames.
-    //
-    // The call has been carefully placed here to cater for a few situations:
-    // 1) After we exit from block after a global poll
-    // 2) After a thread races with the disarming of the global poll and transitions from native/blocked
-    // 3) Before the handshake code is run
-    StackWatermarkSet::on_safepoint(thread);
-
     if (thread->handshake_state()->should_process()) {
-      thread->handshake_state()->process_by_self();
-      did_block = true;
+      if (!thread->handshake_state()->process_by_self()) {
+        need_rechecking = true;
+      }
     }
-  } while(did_block);
+  } while(need_rechecking);
 }
 
 uintptr_t SafepointMechanism::compute_poll_word(bool armed, uintptr_t stack_watermark) {
@@ -150,6 +143,27 @@ void SafepointMechanism::process_if_requested_slow(JavaThread *thread) {
   process(thread);
   update_poll_values(thread);
   OrderAccess::cross_modify_fence();
+}
+
+bool SafepointMechanism::should_process_slow(JavaThread* thread, bool proc_suspend) {
+  if (global_poll()) {
+    return true;
+  }
+
+  if (proc_suspend) thread->set_in_java_transition();
+  bool exe_handshake = thread->handshake_state()->can_process_by_self();
+  if (proc_suspend) thread->clear_in_java_transition();
+
+  if (exe_handshake) {
+    return true;
+  }
+
+  // Armed but no safepoint or handshake, make sure StackWaterMark is checked
+  StackWatermarkSet::on_safepoint(thread);
+
+  update_poll_values(thread);
+
+  return false;
 }
 
 void SafepointMechanism::initialize_header(JavaThread* thread) {

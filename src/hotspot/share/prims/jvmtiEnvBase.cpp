@@ -1626,6 +1626,7 @@ SetFramePopClosure::doit(Thread *target, bool self) {
   assert(_state->get_thread() == java_thread, "Must be");
 
   if (!self && !java_thread->is_suspended()) {
+      log_error(os)("############ %s:%d", __FILE__, __LINE__);
     _result = JVMTI_ERROR_THREAD_NOT_SUSPENDED;
     return;
   }

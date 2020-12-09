@@ -404,14 +404,14 @@ bool ObjectMonitor::enter(TRAPS) {
     }
 
     OSThreadContendState osts(Self->osthread());
-      
+
     JavaThreadState org_ts = jt->thread_state();
     for (;;) {
       jt->frame_anchor()->make_walkable(jt);
       OrderAccess::storestore();
       jt->set_thread_state(_thread_blocked);
       EnterI(THREAD);
-      jt->set_thread_state_fence(_thread_blocked_trans);
+      jt->set_thread_state_fence(org_ts);
       if (SafepointMechanism::should_process(jt)) {
         // We have acquired the contended monitor, but while we were
         // waiting another thread suspended us. We don't want to enter
@@ -965,11 +965,11 @@ void ObjectMonitor::ReenterI(Thread * Self, ObjectWaiter * SelfNode) {
         OrderAccess::storestore();
         jt->set_thread_state(_thread_blocked);
         Self->_ParkEvent->park();
-        jt->set_thread_state_fence(_thread_blocked_trans);
+        jt->set_thread_state_fence(org_ts);
         if (SafepointMechanism::should_process(jt)) {
-          if (_succ == Self) { 
-            _succ = NULL; 
-            OrderAccess::fence(); 
+          if (_succ == Self) {
+            _succ = NULL;
+            OrderAccess::fence();
           }
           SafepointMechanism::process_if_requested(jt);
         } else {
@@ -1910,7 +1910,7 @@ int ObjectMonitor::TrySpin(Thread * Self) {
     // This is in keeping with the "no loitering in runtime" rule.
     // We periodically check to see if there's a safepoint pending.
     if ((ctr & 0xFF) == 0) {
-      if (SafepointMechanism::should_process(Self)) {
+      if (SafepointMechanism::should_process(Self->as_Java_thread())) {
         goto Abort;           // abrupt spin egress
       }
       SpinPause();

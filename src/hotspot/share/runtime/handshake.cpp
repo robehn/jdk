@@ -68,6 +68,7 @@ class HandshakeOperation : public CHeapObj<mtThread> {
   void add_target_count(int count) { Atomic::add(&_pending_threads, count); }
   const char* name()               { return _handshake_cl->name(); }
   bool is_async()                  { return _handshake_cl->is_async(); }
+  bool can_be_executed()           { return _handshake_cl->can_be_executed(_target); }
 };
 
 class AsyncHandshakeOperation : public HandshakeOperation {
@@ -339,9 +340,7 @@ void Handshake::execute(HandshakeClosure* hs_cl, JavaThread* target) {
     hsy.add_result(pr);
     // Check for pending handshakes to avoid possible deadlocks where our
     // target is trying to handshake us.
-    if (SafepointMechanism::should_process(self)) {
-      ThreadBlockInVM tbivm(self);
-    }
+    SafepointMechanism::process_if_requested(self);
     hsy.process();
   }
 
@@ -382,28 +381,18 @@ void HandshakeState::add_operation(HandshakeOperation* op) {
   SafepointMechanism::arm_local_poll_release(_handshakee);
 }
 
-/*class SafepointHandshake : HandshakeClosure {
- public:
-  SafepointHandshake() : HandshakeClosure("Safepoint") {}
-  void do_thread(Thread* target) {
-    OrderAccess::loadload();
-    SafepointSynchronize::block(thread);
-  }
-};
+static bool queue_filter(HandshakeOperation* op) {
+  return op->can_be_executed();
+}
 
-static SafepointHandshake _sh;
-*/
 HandshakeOperation* HandshakeState::pop_for_self() {
   assert(_handshakee == Thread::current(), "Must be called by self");
   assert(_lock.owned_by_self(), "Lock must be held");
-  //if (SafepointSynchronize::_state != SafepointSynchronize::_not_synchronized) {
-  //   return &_sh;
-  //}
-  return _queue.pop();
+  return _queue.pop(queue_filter);
 }
 
 static bool non_self_queue_filter(HandshakeOperation* op) {
-  return !op->is_async();
+  return !op->is_async() && queue_filter(op);
 }
 
 bool HandshakeState::have_non_self_executable_operation() {
@@ -418,18 +407,18 @@ HandshakeOperation* HandshakeState::pop() {
   return _queue.pop(non_self_queue_filter);
 };
 
-void HandshakeState::process_by_self() {
+bool HandshakeState::process_by_self() {
   assert(Thread::current() == _handshakee, "should call from _handshakee");
   assert(!_handshakee->is_terminated(), "should not be a terminated thread");
   assert(_handshakee->thread_state() == _thread_in_vm, "should not be in a blocked state");
   {
     ttyLocker::break_tty_lock_for_safepoint(os::current_thread_id());
     NoSafepointVerifier nsv;
-    process_self_inner();
+    return process_self_inner();
   }
 }
 
-void HandshakeState::process_self_inner() {
+bool HandshakeState::process_self_inner() {
   while (should_process()) {
     HandleMark hm(_handshakee);
     PreserveExceptionMark pem(_handshakee);
@@ -444,10 +433,20 @@ void HandshakeState::process_self_inner() {
       if (async) {
         log_handshake_info(((AsyncHandshakeOperation*)op)->start_time(), op->name(), 1, 0, "asynchronous");
         delete op;
-        return; // Must check for safepoints
+        return false; // Must check for safepoints
       }
-    }
+    } else {
+      return true;
+    } 
   }
+  return true;
+}
+
+bool HandshakeState::can_process_by_self() {
+  MutexLocker ml(&_lock, Mutex::_no_safepoint_check_flag);
+  assert(_handshakee == Thread::current(), "Must be called by self");
+  assert(_lock.owned_by_self(), "Lock must be held");
+  return _queue.contains(queue_filter);
 }
 
 bool HandshakeState::can_process_handshake() {
@@ -553,17 +552,42 @@ HandshakeState::ProcessResult HandshakeState::try_process(HandshakeOperation* ma
                        pr_ret == HandshakeState::_succeeded ? "including" : "excluding", p2i(match_op));
   return pr_ret;
 }
-  
+
+void HandshakeState::lock() {
+  _lock.lock_without_safepoint_check();
+}
+
+void HandshakeState::unlock() {
+  _lock.unlock();
+}
+
+void HandshakeState::thread_exit() {
+  while (true) {
+    {
+      MutexLocker ml(&_lock, Mutex::_no_safepoint_check_flag);
+      if (!_handshakee->is_suspend_requested()) {
+        _handshakee->set_exiting();
+        return;
+      }
+    }
+    SafepointMechanism::process_if_requested(_handshakee);
+  }
+}
+
 void HandshakeState::suspend_in_handshake() {
   assert(Thread::current() == _handshakee, "should call from _handshakee");
   assert(_lock.owned_by_self(), "Lock must be held");
+  log_trace(thread, suspend)("JavaThread:" INTPTR_FORMAT " in suspension", p2i(_handshakee));
   JavaThreadState jts = _handshakee->thread_state();
   while (_handshakee->_suspended) {
     _handshakee->set_thread_state(_thread_blocked);
+    log_trace(thread, suspend)("JavaThread:" INTPTR_FORMAT " waiting for resume", p2i(_handshakee));
     _lock.wait_without_safepoint_check();
+    log_trace(thread, suspend)("JavaThread:" INTPTR_FORMAT " waking up", p2i(_handshakee));
   }
   _handshakee->set_thread_state(jts);
   _handshakee->set_suspend_requested(false);
+  log_trace(thread, suspend)("JavaThread:" INTPTR_FORMAT " RESUMED", p2i(_handshakee));
 }
 
 bool HandshakeState::resume() {

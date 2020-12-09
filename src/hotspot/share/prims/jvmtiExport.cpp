@@ -730,12 +730,14 @@ JvmtiExport::cv_external_thread_to_JavaThread(ThreadsList * t_list,
   oop thread_oop = JNIHandles::resolve_external_guard(thread);
   if (thread_oop == NULL) {
     // NULL jthread, GC'ed jthread or a bad JNI handle.
+    log_error(os)("############ %s:%d", __FILE__, __LINE__);
     return JVMTI_ERROR_INVALID_THREAD;
   }
   // Looks like an oop at this point.
 
   if (!thread_oop->is_a(SystemDictionary::Thread_klass())) {
     // The oop is not a java.lang.Thread.
+    log_error(os)("############ %s:%d", __FILE__, __LINE__);
     return JVMTI_ERROR_INVALID_THREAD;
   }
   // Looks like a java.lang.Thread oop at this point.
@@ -785,6 +787,7 @@ JvmtiExport::cv_oop_to_JavaThread(ThreadsList * t_list, oop thread_oop,
 
   if (!thread_oop->is_a(SystemDictionary::Thread_klass())) {
     // The oop is not a java.lang.Thread.
+    log_error(os)("############ %s:%d", __FILE__, __LINE__);
     return JVMTI_ERROR_INVALID_THREAD;
   }
   // Looks like a java.lang.Thread oop at this point.

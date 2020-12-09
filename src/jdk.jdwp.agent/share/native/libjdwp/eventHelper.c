@@ -203,6 +203,7 @@ enqueueCommand(HelperCommand *command,
             log_debugee_location("enqueueCommand(): HelperCommand wait", NULL, NULL, 0);
             debugMonitorWait(commandCompleteLock);
         }
+        freeCommand(command);
         debugMonitorExit(commandCompleteLock);
     }
 }
@@ -1127,12 +1128,15 @@ void
 eventHelper_reportInvokeDone(jbyte sessionID, jthread thread)
 {
     JNIEnv *env = getEnv();
-    HelperCommand command = {0};
-//    (void)memset(&command, 0, sizeof(*command));
-    command.commandKind = COMMAND_REPORT_INVOKE_DONE;
-    command.sessionID = sessionID;
-    saveGlobalRef(env, thread, &(command.u.reportInvokeDone.thread));
-    enqueueCommand(&command, JNI_TRUE, JNI_FALSE);
+    HelperCommand *command = jvmtiAllocate(sizeof(*command));
+    if (command == NULL) {
+        EXIT_ERROR(AGENT_ERROR_OUT_OF_MEMORY,"HelperCommand");
+    }
+    (void)memset(command, 0, sizeof(*command));
+    command->commandKind = COMMAND_REPORT_INVOKE_DONE;
+    command->sessionID = sessionID;
+    saveGlobalRef(env, thread, &(command->u.reportInvokeDone.thread));
+    enqueueCommand(command, JNI_TRUE, JNI_FALSE);
 }
 
 /*
@@ -1142,23 +1146,29 @@ eventHelper_reportInvokeDone(jbyte sessionID, jthread thread)
 void
 eventHelper_reportVMInit(JNIEnv *env, jbyte sessionID, jthread thread, jbyte suspendPolicy)
 {
-    HelperCommand command = {0};
-//    (void)memset(&command, 0, sizeof(*command));
-    command.commandKind = COMMAND_REPORT_VM_INIT;
-    command.sessionID = sessionID;
-    saveGlobalRef(env, thread, &(command.u.reportVMInit.thread));
-    command.u.reportVMInit.suspendPolicy = suspendPolicy;
-    enqueueCommand(&command, JNI_TRUE, JNI_FALSE);
+    HelperCommand *command = jvmtiAllocate(sizeof(*command));
+    if (command == NULL) {
+        EXIT_ERROR(AGENT_ERROR_OUT_OF_MEMORY,"HelperCommmand");
+    }
+    (void)memset(command, 0, sizeof(*command));
+    command->commandKind = COMMAND_REPORT_VM_INIT;
+    command->sessionID = sessionID;
+    saveGlobalRef(env, thread, &(command->u.reportVMInit.thread));
+    command->u.reportVMInit.suspendPolicy = suspendPolicy;
+    enqueueCommand(command, JNI_TRUE, JNI_FALSE);
 }
 
 void
 eventHelper_suspendThread(jbyte sessionID, jthread thread)
 {
     JNIEnv *env = getEnv();
-    HelperCommand command = {0};
-//    (void)memset(&command, 0, sizeof(*command));
-    command.commandKind = COMMAND_SUSPEND_THREAD;
-    command.sessionID = sessionID;
-    saveGlobalRef(env, thread, &(command.u.suspendThread.thread));
-    enqueueCommand(&command, JNI_TRUE, JNI_FALSE);
+    HelperCommand *command = jvmtiAllocate(sizeof(*command));
+    if (command == NULL) {
+        EXIT_ERROR(AGENT_ERROR_OUT_OF_MEMORY,"HelperCommmand");
+    }
+    (void)memset(command, 0, sizeof(*command));
+    command->commandKind = COMMAND_SUSPEND_THREAD;
+    command->sessionID = sessionID;
+    saveGlobalRef(env, thread, &(command->u.suspendThread.thread));
+    enqueueCommand(command, JNI_TRUE, JNI_FALSE);
 }
