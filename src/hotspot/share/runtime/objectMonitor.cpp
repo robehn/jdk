@@ -406,13 +406,13 @@ bool ObjectMonitor::enter(TRAPS) {
     OSThreadContendState osts(Self->osthread());
 
     JavaThreadState org_ts = jt->thread_state();
+    jt->frame_anchor()->make_walkable(jt);
+    OrderAccess::storestore();
     for (;;) {
-      jt->frame_anchor()->make_walkable(jt);
-      OrderAccess::storestore();
       jt->set_thread_state(_thread_blocked);
       EnterI(THREAD);
       jt->set_thread_state_fence(org_ts);
-      if (SafepointMechanism::should_process(jt)) {
+      if (SafepointMechanism::should_process(jt, true)) {
         // We have acquired the contended monitor, but while we were
         // waiting another thread suspended us. We don't want to enter
         // the monitor while suspended because that would surprise the
@@ -420,7 +420,7 @@ bool ObjectMonitor::enter(TRAPS) {
         _recursions = 0;
         _succ = NULL;
         exit(false, Self);
-        SafepointMechanism::process_if_requested(jt);
+        SafepointMechanism::process_if_requested(jt, true);
       } else {
         jt->set_thread_state(org_ts);
         break;
@@ -960,23 +960,18 @@ void ObjectMonitor::ReenterI(Thread * Self, ObjectWaiter * SelfNode) {
     {
       OSThreadContendState osts(Self->osthread());
       JavaThreadState org_ts = jt->thread_state();
-      for (;;) {
-        jt->frame_anchor()->make_walkable(jt);
-        OrderAccess::storestore();
-        jt->set_thread_state(_thread_blocked);
-        Self->_ParkEvent->park();
-        jt->set_thread_state_fence(org_ts);
-        if (SafepointMechanism::should_process(jt)) {
-          if (_succ == Self) {
+      jt->frame_anchor()->make_walkable(jt);
+      OrderAccess::storestore();
+      jt->set_thread_state(_thread_blocked);
+      Self->_ParkEvent->park();
+      jt->set_thread_state_fence(org_ts);
+      if (SafepointMechanism::should_process(jt, true)) {
+        if (_succ == Self) {
             _succ = NULL;
             OrderAccess::fence();
-          }
-          SafepointMechanism::process_if_requested(jt);
-        } else {
-          jt->set_thread_state(org_ts);
-          break;
         }
-      }
+        SafepointMechanism::process_if_requested(jt);
+      } 
     }
 
     // Try again, but just so we distinguish between futile wakeups and
@@ -1537,7 +1532,8 @@ void ObjectMonitor::wait(jlong millis, bool interruptible, TRAPS) {
     OSThread* osthread = Self->osthread();
     OSThreadWaitState osts(osthread, true);
     {
-      ThreadBlockInVM tbivm(jt);
+      JavaThreadState org_ts = jt->thread_state();
+      jt->set_thread_state(_thread_blocked);
       if (interrupted || HAS_PENDING_EXCEPTION) {
         // Intentionally empty
       } else if (node._notified == 0) {
@@ -1547,8 +1543,15 @@ void ObjectMonitor::wait(jlong millis, bool interruptible, TRAPS) {
           ret = Self->_ParkEvent->park(millis);
         }
       }
-      // TODO-FIXME: add -- if succ == Self then succ = null, if suspending on back-edge.
-    } // Exit thread safepoint: transition _thread_blocked -> _thread_in_vm
+      jt->set_thread_state_fence(org_ts);
+      if (SafepointMechanism::should_process(jt, true)) {
+        if (_succ == Self) {
+            _succ = NULL;
+            OrderAccess::fence();
+        }
+        SafepointMechanism::process_if_requested(jt, true);
+      } 
+    }
 
     // Node may be on the WaitSet, the EntryList (or cxq), or in transition
     // from the WaitSet to the EntryList.
