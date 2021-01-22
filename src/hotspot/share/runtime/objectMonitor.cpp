@@ -970,8 +970,8 @@ void ObjectMonitor::ReenterI(Thread * Self, ObjectWaiter * SelfNode) {
             _succ = NULL;
             OrderAccess::fence();
         }
-        SafepointMechanism::process_if_requested(jt);
-      } 
+        SafepointMechanism::process_if_requested(jt, true);
+      }
     }
 
     // Try again, but just so we distinguish between futile wakeups and
@@ -1550,7 +1550,7 @@ void ObjectMonitor::wait(jlong millis, bool interruptible, TRAPS) {
             OrderAccess::fence();
         }
         SafepointMechanism::process_if_requested(jt, true);
-      } 
+      }
     }
 
     // Node may be on the WaitSet, the EntryList (or cxq), or in transition
@@ -1913,8 +1913,12 @@ int ObjectMonitor::TrySpin(Thread * Self) {
     // This is in keeping with the "no loitering in runtime" rule.
     // We periodically check to see if there's a safepoint pending.
     if ((ctr & 0xFF) == 0) {
-      if (SafepointMechanism::should_process(Self->as_Java_thread())) {
-        goto Abort;           // abrupt spin egress
+      JavaThread* self_jt = Self->as_Java_thread();
+      if (self_jt->thread_state() != _thread_blocked) {
+        assert(self_jt->thread_state() != _thread_in_native, "Must not be");
+        if (SafepointMechanism::should_process(Self->as_Java_thread())) {
+          goto Abort;           // abrupt spin egress
+        }
       }
       SpinPause();
     }

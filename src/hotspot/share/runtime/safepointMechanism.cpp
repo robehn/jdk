@@ -117,6 +117,8 @@ uintptr_t SafepointMechanism::compute_poll_word(bool armed, uintptr_t stack_wate
 }
 
 void SafepointMechanism::update_poll_values(JavaThread* thread) {
+  assert(thread->thread_state() != _thread_blocked, "Must not be");
+  assert(thread->thread_state() != _thread_in_native, "Must not be");
   for (;;) {
     bool armed = global_poll() || thread->handshake_state()->has_operation();
     uintptr_t stack_watermark = StackWatermarkSet::lowest_watermark(thread);
@@ -136,6 +138,8 @@ void SafepointMechanism::update_poll_values(JavaThread* thread) {
 }
 
 void SafepointMechanism::process_if_requested_slow(JavaThread *thread) {
+  assert(thread->thread_state() != _thread_blocked, "Must not be");
+  assert(thread->thread_state() != _thread_in_native, "Must not be");
   // Read global poll and has_handshake after local poll
   OrderAccess::loadload();
 
@@ -146,6 +150,8 @@ void SafepointMechanism::process_if_requested_slow(JavaThread *thread) {
 }
 
 bool SafepointMechanism::should_process_slow(JavaThread* thread, bool proc_suspend) {
+  assert(thread->thread_state() != _thread_blocked, "Must not be");
+  assert(thread->thread_state() != _thread_in_native, "Must not be");
   if (global_poll()) {
     return true;
   }
