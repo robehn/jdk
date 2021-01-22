@@ -2001,8 +2001,8 @@ nmethod *SharedRuntime::generate_native_wrapper(MacroAssembler *masm,
   //   - Thread A is resumed to finish this native method, but doesn't block here since it
   //     didn't see any synchronization in progress, and escapes.
 
-  // Transition from _thread_in_native to _thread_in_native_trans.
-  __ set_thread_state(_thread_in_native_trans);
+  // Transition from _thread_in_native to _thread_in_Java
+  __ set_thread_state(_thread_in_Java);
 
   // Safepoint synchronization
   //--------------------------------------------------------------------
@@ -2041,10 +2041,10 @@ nmethod *SharedRuntime::generate_native_wrapper(MacroAssembler *masm,
   }
 
   //--------------------------------------------------------------------
-  // Thread state is thread_in_native_trans. Any safepoint blocking has
+  // Thread state is thread_in_Java. Any safepoint blocking has
   // already happened so we can now change state to _thread_in_Java.
   //--------------------------------------------------------------------
-  // Transition from _thread_in_native_trans to _thread_in_Java.
+  
   __ set_thread_state(_thread_in_Java);
   __ bind(after_transition);
 

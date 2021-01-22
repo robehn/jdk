@@ -1551,7 +1551,7 @@ address TemplateInterpreterGenerator::generate_native_entry(bool synchronized) {
   // native method, but doesn't block here since it didn't see any
   // synchronization is progress, and escapes.
 
-  __ set_thread_state(_thread_in_native_trans);
+  __ set_thread_state(_thread_in_Java);
   __ z_fence();
 
   // Now before we return to java we must look for a current safepoint

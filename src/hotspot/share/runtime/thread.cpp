@@ -1971,9 +1971,6 @@ void JavaThread::remove_monitor_chunk(MonitorChunk* chunk) {
 
 // JVM support.
 
-// Note: this function shouldn't block if it's called in
-// _thread_in_native_trans state (such as from
-// check_special_condition_for_native_trans()).
 void JavaThread::check_and_handle_async_exceptions(bool check_unsafe_error) {
   JavaThread::AsyncRequests condition = clear_special_runtime_exit_condition();
   if (condition == _no_async_condition) {
@@ -2221,7 +2218,7 @@ void JavaThread::verify_not_published() {
 // block if a safepoint is in progress.
 // Also check for pending async exception (not including unsafe access error).
 // Note only the native==>VM/Java barriers can call this function and when
-// thread state is _thread_in_native_trans.
+// thread state is _thread_in_Java.
 void JavaThread::check_special_condition_for_native_trans(JavaThread *thread) {
   assert(!thread->has_last_Java_frame() || thread->frame_anchor()->walkable(), "Unwalkable stack in native->vm transition");
 

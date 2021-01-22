@@ -1460,7 +1460,7 @@ address TemplateInterpreterGenerator::generate_native_entry(bool synchronized) {
   // We use release_store_fence to update values like the thread state, where
   // we don't want the current thread to continue until all our prior memory
   // accesses (including the new thread state) are visible to other threads.
-  __ li(R0/*thread_state*/, _thread_in_native_trans);
+  __ li(R0/*thread_state*/, _thread_in_Java);
   __ release();
   __ stw(R0/*thread_state*/, thread_(thread_state));
   __ fence();

@@ -1907,7 +1907,7 @@ nmethod* SharedRuntime::generate_native_wrapper(MacroAssembler* masm,
   //     VM thread changes sync state to synchronizing and suspends threads for GC.
   //     Thread A is resumed to finish this native method, but doesn't block here since it
   //     didn't see any synchronization is progress, and escapes.
-  __ movl(Address(thread, JavaThread::thread_state_offset()), _thread_in_native_trans);
+  __ movl(Address(thread, JavaThread::thread_state_offset()), _thread_in_Java);
 
   // Force this write out before the read below
   __ membar(Assembler::Membar_mask_bits(
