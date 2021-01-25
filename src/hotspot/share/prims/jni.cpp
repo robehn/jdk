@@ -3860,7 +3860,7 @@ static jint attach_current_thread(JavaVM *vm, void **penv, void *_args, bool dae
 
   // Now leaving the VM, so change thread_state. This is normally automatically taken care
   // of in the JVM_ENTRY. But in this situation we have to do it manually. Notice, that by
-  // using ThreadStateTransition::transition, we do a callback to the safepoint code if
+  // using manual thread state transition, we do a callback to the safepoint code if
   // needed.
 
   Transition<_thread_in_vm, _thread_in_native>::trans(thread);

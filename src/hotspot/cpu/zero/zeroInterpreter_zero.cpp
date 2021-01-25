@@ -412,7 +412,7 @@ int ZeroInterpreter::native_entry(Method* method, intptr_t UNUSED, TRAPS) {
   thread->set_last_Java_frame();
 
   // Change the thread state to _thread_in_native
-  ThreadStateTransition::transition_from_java(thread, _thread_in_native);
+  Transition<_thread_in_Java, _thread_in_native>::trans(thread);
 
   // Make the call
   intptr_t result[4 - LogBytesPerWord];
@@ -420,21 +420,8 @@ int ZeroInterpreter::native_entry(Method* method, intptr_t UNUSED, TRAPS) {
 
   // Change the thread state back to _thread_in_Java and ensure it
   // is seen by the GC thread.
-  // ThreadStateTransition::transition_from_native() cannot be used
-  // here because it does not check for asynchronous exceptions.
-  // We have to manage the transition ourself.
-  thread->set_thread_state_fence(_thread_in_Java);
+  Transition<_thread_in_native, _thread_in_Java>::trans(thread);
 
-  // Handle safepoint operations, pending suspend requests,
-  // and pending asynchronous exceptions.
-  if (SafepointMechanism::should_process(thread) ||
-      thread->has_special_condition_for_native_trans()) {
-    JavaThread::check_special_condition_for_native_trans(thread);
-    CHECK_UNHANDLED_OOPS_ONLY(thread->clear_unhandled_oops());
-  }
-
-  // Finally we can change the thread state to _thread_in_Java.
-  thread->set_thread_state(_thread_in_Java);
   fixup_after_potential_safepoint();
 
   // Clear the frame anchor
@@ -553,7 +540,7 @@ int ZeroInterpreter::native_entry(Method* method, intptr_t UNUSED, TRAPS) {
 
 int ZeroInterpreter::getter_entry(Method* method, intptr_t UNUSED, TRAPS) {
   // Drop into the slow path if we need a safepoint check
-  if (SafepointMechanism::should_process(THREAD)) {
+  if (SafepointMechanism::should_process(THREAD->as_Java_thread())) {
     return normal_entry(method, 0, THREAD);
   }
 
@@ -641,7 +628,7 @@ int ZeroInterpreter::getter_entry(Method* method, intptr_t UNUSED, TRAPS) {
 
 int ZeroInterpreter::setter_entry(Method* method, intptr_t UNUSED, TRAPS) {
   // Drop into the slow path if we need a safepoint check
-  if (SafepointMechanism::should_process(THREAD)) {
+  if (SafepointMechanism::should_process(THREAD->as_Java_thread())) {
     return normal_entry(method, 0, THREAD);
   }
 
@@ -735,7 +722,7 @@ int ZeroInterpreter::empty_entry(Method* method, intptr_t UNUSED, TRAPS) {
   ZeroStack *stack = thread->zero_stack();
 
   // Drop into the slow path if we need a safepoint check
-  if (SafepointMechanism::should_process(THREAD)) {
+  if (SafepointMechanism::should_process(thread)) {
     return normal_entry(method, 0, THREAD);
   }
 

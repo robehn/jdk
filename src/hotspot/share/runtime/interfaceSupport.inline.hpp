@@ -95,7 +95,8 @@ template<>
 class Transition<_thread_in_vm, _thread_in_Java> {
  public:
   static inline void trans(JavaThread *thread, bool async = false) {
-    assert(thread->thread_state() == _thread_in_vm, "coming from wrong thread state");
+    assert(thread->thread_state() == _thread_in_vm ||
+           thread->thread_state() == _thread_in_native, "coming from wrong thread state");
     if (thread->stack_overflow_state()->stack_yellow_reserved_zone_disabled()) {
       thread->stack_overflow_state()->enable_stack_yellow_reserved_zone();
     }
