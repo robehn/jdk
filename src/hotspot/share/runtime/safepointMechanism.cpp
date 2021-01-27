@@ -168,6 +168,7 @@ bool SafepointMechanism::should_process_slow(JavaThread* thread, bool proc_suspe
   StackWatermarkSet::on_safepoint(thread);
 
   update_poll_values(thread);
+  OrderAccess::cross_modify_fence();
 
   return false;
 }
