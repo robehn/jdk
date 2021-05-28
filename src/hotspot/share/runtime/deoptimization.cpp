@@ -245,54 +245,6 @@ static bool rematerialize_objects(JavaThread* thread, int exec_mode, CompiledMet
   return realloc_failures;
 }
 
-static void restore_eliminated_locks(JavaThread* thread, GrowableArray<compiledVFrame*>* chunk, bool realloc_failures,
-                                     frame& deoptee, int exec_mode, bool& deoptimized_objects) {
-  JavaThread* deoptee_thread = chunk->at(0)->thread();
-  assert(!EscapeBarrier::objs_are_deoptimized(deoptee_thread, deoptee.id()), "must relock just once");
-  assert(thread == Thread::current(), "should be");
-  HandleMark hm(thread);
-#ifndef PRODUCT
-  bool first = true;
-#endif
-  for (int i = 0; i < chunk->length(); i++) {
-    compiledVFrame* cvf = chunk->at(i);
-    assert (cvf->scope() != NULL,"expect only compiled java frames");
-    GrowableArray<MonitorInfo*>* monitors = cvf->monitors();
-    if (monitors->is_nonempty()) {
-      bool relocked = Deoptimization::relock_objects(thread, monitors, deoptee_thread, deoptee,
-                                                     exec_mode, realloc_failures);
-      deoptimized_objects = deoptimized_objects || relocked;
-#ifndef PRODUCT
-      if (PrintDeoptimizationDetails) {
-        ttyLocker ttyl;
-        for (int j = 0; j < monitors->length(); j++) {
-          MonitorInfo* mi = monitors->at(j);
-          if (mi->eliminated()) {
-            if (first) {
-              first = false;
-              tty->print_cr("RELOCK OBJECTS in thread " INTPTR_FORMAT, p2i(thread));
-            }
-            if (exec_mode == Deoptimization::Unpack_none) {
-              ObjectMonitor* monitor = deoptee_thread->current_waiting_monitor();
-              if (monitor != NULL && monitor->object() == mi->owner()) {
-                tty->print_cr("     object <" INTPTR_FORMAT "> DEFERRED relocking after wait", p2i(mi->owner()));
-                continue;
-              }
-            }
-            if (mi->owner_is_scalar_replaced()) {
-              Klass* k = java_lang_Class::as_Klass(mi->owner_klass());
-              tty->print_cr("     failed reallocation for klass %s", k->external_name());
-            } else {
-              tty->print_cr("     object <" INTPTR_FORMAT "> locked", p2i(mi->owner()));
-            }
-          }
-        }
-      }
-#endif // !PRODUCT
-    }
-  }
-}
-
 // Deoptimize objects, that is reallocate and relock them, just before they escape through JVMTI.
 // The given vframes cover one physical frame.
 bool Deoptimization::deoptimize_objects_internal(JavaThread* thread, GrowableArray<compiledVFrame*>* chunk,
@@ -311,16 +263,6 @@ bool Deoptimization::deoptimize_objects_internal(JavaThread* thread, GrowableArr
     realloc_failures = rematerialize_objects(thread, Unpack_none, cm, deoptee, map, chunk, deoptimized_objects);
   }
 
-  // Revoke biases of objects with eliminated locks in the given frame.
-  Deoptimization::revoke_for_object_deoptimization(deoptee_thread, deoptee, &map, thread);
-
-  // MonitorInfo structures used in eliminate_locks are not GC safe.
-  NoSafepointVerifier no_safepoint;
-
-  // Now relock objects if synchronization on them was eliminated.
-  if (jvmci_enabled COMPILER2_PRESENT(|| ((DoEscapeAnalysis || EliminateNestedLocks) && EliminateLocks))) {
-    restore_eliminated_locks(thread, chunk, realloc_failures, deoptee, Unpack_none, deoptimized_objects);
-  }
   return deoptimized_objects;
 }
 #endif // COMPILER2_OR_JVMCI
@@ -392,14 +334,6 @@ Deoptimization::UnrollBlock* Deoptimization::fetch_unroll_info_helper(JavaThread
   // out the java state residing in the vframeArray will be missed.
   // Locks may be rebaised in a safepoint.
   NoSafepointVerifier no_safepoint;
-
-#if COMPILER2_OR_JVMCI
-  if ((jvmci_enabled COMPILER2_PRESENT( || ((DoEscapeAnalysis || EliminateNestedLocks) && EliminateLocks) ))
-      && !EscapeBarrier::objs_are_deoptimized(current, deoptee.id())) {
-    bool unused;
-    restore_eliminated_locks(current, chunk, realloc_failures, deoptee, exec_mode, unused);
-  }
-#endif // COMPILER2_OR_JVMCI
 
   ScopeDesc* trap_scope = chunk->at(0)->scope();
   Handle exceptionObject;
@@ -1429,58 +1363,6 @@ void Deoptimization::reassign_fields(frame* fr, RegisterMap* reg_map, GrowableAr
   }
 }
 
-
-// relock objects for which synchronization was eliminated
-bool Deoptimization::relock_objects(JavaThread* thread, GrowableArray<MonitorInfo*>* monitors,
-                                    JavaThread* deoptee_thread, frame& fr, int exec_mode, bool realloc_failures) {
-  bool relocked_objects = false;
-  for (int i = 0; i < monitors->length(); i++) {
-    MonitorInfo* mon_info = monitors->at(i);
-    if (mon_info->eliminated()) {
-      assert(!mon_info->owner_is_scalar_replaced() || realloc_failures, "reallocation was missed");
-      relocked_objects = true;
-      if (!mon_info->owner_is_scalar_replaced()) {
-        Handle obj(thread, mon_info->owner());
-        markWord mark = obj->mark();
-        if (UseBiasedLocking && mark.has_bias_pattern()) {
-          // New allocated objects may have the mark set to anonymously biased.
-          // Also the deoptimized method may called methods with synchronization
-          // where the thread-local object is bias locked to the current thread.
-          assert(mark.is_biased_anonymously() ||
-                 mark.biased_locker() == deoptee_thread, "should be locked to current thread");
-          // Reset mark word to unbiased prototype.
-          markWord unbiased_prototype = markWord::prototype().set_age(mark.age());
-          obj->set_mark(unbiased_prototype);
-        } else if (exec_mode == Unpack_none) {
-          if (mark.has_locker() && fr.sp() > (intptr_t*)mark.locker()) {
-            // With exec_mode == Unpack_none obj may be thread local and locked in
-            // a callee frame. In this case the bias was revoked before in revoke_for_object_deoptimization().
-            // Make the lock in the callee a recursive lock and restore the displaced header.
-            markWord dmw = mark.displaced_mark_helper();
-            mark.locker()->set_displaced_header(markWord::encode((BasicLock*) NULL));
-            obj->set_mark(dmw);
-          }
-          if (mark.has_monitor()) {
-            // defer relocking if the deoptee thread is currently waiting for obj
-            ObjectMonitor* waiting_monitor = deoptee_thread->current_waiting_monitor();
-            if (waiting_monitor != NULL && waiting_monitor->object() == obj()) {
-              assert(fr.is_deoptimized_frame(), "frame must be scheduled for deoptimization");
-              mon_info->lock()->set_displaced_header(markWord::unused_mark());
-              JvmtiDeferredUpdates::inc_relock_count_after_wait(deoptee_thread);
-              continue;
-            }
-          }
-        }
-        BasicLock* lock = mon_info->lock();
-        ObjectSynchronizer::enter(obj, lock, deoptee_thread);
-        assert(mon_info->owner()->is_locked(), "object must be locked now");
-      }
-    }
-  }
-  return relocked_objects;
-}
-
-
 #ifndef PRODUCT
 // print information about reallocated objects
 void Deoptimization::print_objects(GrowableArray<ScopeValue*>* objects, bool realloc_failures) {
@@ -1574,24 +1456,6 @@ void Deoptimization::pop_frames_failed_reallocs(JavaThread* thread, vframeArray*
   // deoptimized compiled frame.
   assert(thread->frames_to_pop_failed_realloc() == 0, "missed frames to pop?");
   thread->set_frames_to_pop_failed_realloc(array->frames());
-  // Unlock all monitors here otherwise the interpreter will see a
-  // mix of locked and unlocked monitors (because of failed
-  // reallocations of synchronized objects) and be confused.
-  for (int i = 0; i < array->frames(); i++) {
-    MonitorChunk* monitors = array->element(i)->monitors();
-    if (monitors != NULL) {
-      for (int j = 0; j < monitors->number_of_monitors(); j++) {
-        BasicObjectLock* src = monitors->at(j);
-        if (src->obj() != NULL) {
-          ObjectSynchronizer::exit(src->obj(), src->lock(), thread);
-        }
-      }
-      array->element(i)->free_monitors(thread);
-#ifdef ASSERT
-      array->element(i)->set_removed_monitors();
-#endif
-    }
-  }
 }
 #endif
 
@@ -1651,39 +1515,6 @@ void Deoptimization::revoke_from_deopt_handler(JavaThread* thread, frame fr, Reg
     oop obj = (objects_to_revoke->at(i))();
     BiasedLocking::revoke_own_lock(thread, objects_to_revoke->at(i));
     assert(!obj->mark().has_bias_pattern(), "biases should be revoked by now");
-  }
-}
-
-// Revoke the bias of objects with eliminated locking to prepare subsequent relocking.
-void Deoptimization::revoke_for_object_deoptimization(JavaThread* deoptee_thread, frame fr,
-                                                      RegisterMap* map, JavaThread* thread) {
-  if (!UseBiasedLocking) {
-    return;
-  }
-  GrowableArray<Handle>* objects_to_revoke = new GrowableArray<Handle>();
-  assert(KeepStackGCProcessedMark::stack_is_kept_gc_processed(deoptee_thread), "must be");
-  // Collect monitors but only those with eliminated locking.
-  get_monitors_from_stack(objects_to_revoke, deoptee_thread, fr, map, true);
-
-  int len = objects_to_revoke->length();
-  for (int i = 0; i < len; i++) {
-    oop obj = (objects_to_revoke->at(i))();
-    markWord mark = obj->mark();
-    if (!mark.has_bias_pattern() ||
-        mark.is_biased_anonymously() || // eliminated locking does not bias an object if it wasn't before
-        !obj->klass()->prototype_header().has_bias_pattern() || // bulk revoke ignores eliminated monitors
-        (obj->klass()->prototype_header().bias_epoch() != mark.bias_epoch())) { // bulk rebias ignores eliminated monitors
-      // We reach here regularly if there's just eliminated locking on obj.
-      // We must not call BiasedLocking::revoke_own_lock() in this case, as we
-      // would hit assertions because it is a prerequisite that there has to be
-      // non-eliminated locking on obj by deoptee_thread.
-      // Luckily we don't have to revoke here because obj has to be a
-      // non-escaping obj and can be relocked without revoking the bias. See
-      // Deoptimization::relock_objects().
-      continue;
-    }
-    BiasedLocking::revoke(thread, objects_to_revoke->at(i));
-    assert(!objects_to_revoke->at(i)->mark().has_bias_pattern(), "biases should be revoked by now");
   }
 }
 

@@ -58,6 +58,75 @@
 #include "utilities/events.hpp"
 #include "utilities/preserveException.hpp"
 
+
+pthread_mutex_t ObjectSynchronizer::BJL = PTHREAD_RECURSIVE_MUTEX_INITIALIZER_NP;
+pthread_cond_t ObjectSynchronizer::BJL_COND;
+volatile Thread* ObjectSynchronizer::_owner = NULL;
+volatile int ObjectSynchronizer::_rec = 0;
+
+void ObjectSynchronizer::BJL_wait() {
+  ThreadBlockInVM tbivm(JavaThread::current());
+  log_debug(os)("%p: %s:%d", Thread::current(), __func__, __LINE__);
+  int save = _rec;
+  _owner = 0;
+  _rec = 0;
+  int ret = pthread_cond_wait(&BJL_COND, &BJL);
+  _rec = save;
+  _owner = Thread::current();
+  log_debug(os)("%p: %s:%d WAITED: %d", Thread::current(), __func__, __LINE__, _rec);
+  assert(ret == 0, "bad");
+}
+ 
+void ObjectSynchronizer::BJL_notify() {
+  log_debug(os)("%p: %s:%d", Thread::current(), __func__, __LINE__);
+  int ret = pthread_cond_signal(&BJL_COND);
+  log_debug(os)("%p: %s:%d NOTIFIED: %d", Thread::current(), __func__, __LINE__, _rec);
+  assert(ret == 0, "bad");
+}
+
+void ObjectSynchronizer::BJL_notify_all() {
+  log_debug(os)("%p: %s:%d", Thread::current(), __func__, __LINE__);
+  int ret = pthread_cond_broadcast(&BJL_COND);
+  log_debug(os)("%p: %s:%d NOTIFIED ALL: %d", Thread::current(), __func__, __LINE__, _rec);
+  assert(ret == 0, "bad");
+}
+
+bool ObjectSynchronizer::owns_BJL(JavaThread* current, Handle h_obj) {
+  return _owner == current;
+}
+
+void ObjectSynchronizer::BJL_lock(Handle obj) {
+  ThreadBlockInVM tbivm(JavaThread::current());
+  log_debug(os)("%p: %s:%d", Thread::current(), __func__, __LINE__);
+  if (_owner == Thread::current()) {
+    _rec++;
+  } else {
+    int ret = pthread_mutex_lock(&BJL);
+    assert(ret == 0, "bad");
+    assert(_owner == NULL, "Bad");
+    _owner = Thread::current();
+  }
+  /*ResourceMark rm;
+  LogTarget(Debug, os) lt;             
+  LogStream ls(lt);
+  obj()->print_on(&ls);*/
+  
+  log_debug(os)("%p: %s:%d LOCKED: %d", Thread::current(), __func__, __LINE__, _rec);
+}
+
+void ObjectSynchronizer::BJL_unlock() {
+  log_debug(os)("%p: %s:%d", Thread::current(), __func__, __LINE__);
+  assert(_owner == Thread::current(), "Bad:%p != %p", _owner, Thread::current());
+  if (_rec > 0) {
+    _rec--;
+  } else {
+    _owner = NULL;
+    int ret = pthread_mutex_unlock(&BJL);
+    assert(ret == 0, "bad");
+  }
+  log_debug(os)("%p: %s:%d UNLOCKED: %d", Thread::current(), __func__, __LINE__, _rec);
+}
+
 void MonitorList::add(ObjectMonitor* m) {
   ObjectMonitor* head;
   do {
@@ -242,135 +311,6 @@ bool volatile ObjectSynchronizer::_is_final_audit = false;
 jlong ObjectSynchronizer::_last_async_deflation_time_ns = 0;
 static uintx _no_progress_cnt = 0;
 
-// =====================> Quick functions
-
-// The quick_* forms are special fast-path variants used to improve
-// performance.  In the simplest case, a "quick_*" implementation could
-// simply return false, in which case the caller will perform the necessary
-// state transitions and call the slow-path form.
-// The fast-path is designed to handle frequently arising cases in an efficient
-// manner and is just a degenerate "optimistic" variant of the slow-path.
-// returns true  -- to indicate the call was satisfied.
-// returns false -- to indicate the call needs the services of the slow-path.
-// A no-loitering ordinance is in effect for code in the quick_* family
-// operators: safepoints or indefinite blocking (blocking that might span a
-// safepoint) are forbidden. Generally the thread_state() is _in_Java upon
-// entry.
-//
-// Consider: An interesting optimization is to have the JIT recognize the
-// following common idiom:
-//   synchronized (someobj) { .... ; notify(); }
-// That is, we find a notify() or notifyAll() call that immediately precedes
-// the monitorexit operation.  In that case the JIT could fuse the operations
-// into a single notifyAndExit() runtime primitive.
-
-bool ObjectSynchronizer::quick_notify(oopDesc* obj, JavaThread* current, bool all) {
-  assert(current->thread_state() == _thread_in_Java, "invariant");
-  NoSafepointVerifier nsv;
-  if (obj == NULL) return false;  // slow-path for invalid obj
-  const markWord mark = obj->mark();
-
-  if (mark.has_locker() && current->is_lock_owned((address)mark.locker())) {
-    // Degenerate notify
-    // stack-locked by caller so by definition the implied waitset is empty.
-    return true;
-  }
-
-  if (mark.has_monitor()) {
-    ObjectMonitor* const mon = mark.monitor();
-    assert(mon->object() == oop(obj), "invariant");
-    if (mon->owner() != current) return false;  // slow-path for IMS exception
-
-    if (mon->first_waiter() != NULL) {
-      // We have one or more waiters. Since this is an inflated monitor
-      // that we own, we can transfer one or more threads from the waitset
-      // to the entrylist here and now, avoiding the slow-path.
-      if (all) {
-        DTRACE_MONITOR_PROBE(notifyAll, mon, obj, current);
-      } else {
-        DTRACE_MONITOR_PROBE(notify, mon, obj, current);
-      }
-      int free_count = 0;
-      do {
-        mon->INotify(current);
-        ++free_count;
-      } while (mon->first_waiter() != NULL && all);
-      OM_PERFDATA_OP(Notifications, inc(free_count));
-    }
-    return true;
-  }
-
-  // biased locking and any other IMS exception states take the slow-path
-  return false;
-}
-
-
-// The LockNode emitted directly at the synchronization site would have
-// been too big if it were to have included support for the cases of inflated
-// recursive enter and exit, so they go here instead.
-// Note that we can't safely call AsyncPrintJavaStack() from within
-// quick_enter() as our thread state remains _in_Java.
-
-bool ObjectSynchronizer::quick_enter(oop obj, JavaThread* current,
-                                     BasicLock * lock) {
-  assert(current->thread_state() == _thread_in_Java, "invariant");
-  NoSafepointVerifier nsv;
-  if (obj == NULL) return false;       // Need to throw NPE
-
-  if (obj->klass()->is_value_based()) {
-    return false;
-  }
-
-  const markWord mark = obj->mark();
-
-  if (mark.has_monitor()) {
-    ObjectMonitor* const m = mark.monitor();
-    // An async deflation or GC can race us before we manage to make
-    // the ObjectMonitor busy by setting the owner below. If we detect
-    // that race we just bail out to the slow-path here.
-    if (m->object_peek() == NULL) {
-      return false;
-    }
-    JavaThread* const owner = (JavaThread*) m->owner_raw();
-
-    // Lock contention and Transactional Lock Elision (TLE) diagnostics
-    // and observability
-    // Case: light contention possibly amenable to TLE
-    // Case: TLE inimical operations such as nested/recursive synchronization
-
-    if (owner == current) {
-      m->_recursions++;
-      return true;
-    }
-
-    // This Java Monitor is inflated so obj's header will never be
-    // displaced to this thread's BasicLock. Make the displaced header
-    // non-NULL so this BasicLock is not seen as recursive nor as
-    // being locked. We do this unconditionally so that this thread's
-    // BasicLock cannot be mis-interpreted by any stack walkers. For
-    // performance reasons, stack walkers generally first check for
-    // Biased Locking in the object's header, the second check is for
-    // stack-locking in the object's header, the third check is for
-    // recursive stack-locking in the displaced header in the BasicLock,
-    // and last are the inflated Java Monitor (ObjectMonitor) checks.
-    lock->set_displaced_header(markWord::unused_mark());
-
-    if (owner == NULL && m->try_set_owner_from(NULL, current) == NULL) {
-      assert(m->_recursions == 0, "invariant");
-      return true;
-    }
-  }
-
-  // Note that we could inflate in quick_enter.
-  // This is likely a useful optimization
-  // Critically, in quick_enter() we must not:
-  // -- perform bias revocation, or
-  // -- block indefinitely, or
-  // -- reach a safepoint
-
-  return false;        // revert to slow-path
-}
-
 // Handle notifications when synchronizing on value based classes
 void ObjectSynchronizer::handle_sync_on_value_based_class(Handle obj, JavaThread* current) {
   frame last_frame = current->last_frame();
@@ -421,199 +361,6 @@ void ObjectSynchronizer::handle_sync_on_value_based_class(Handle obj, JavaThread
 }
 
 // -----------------------------------------------------------------------------
-// Monitor Enter/Exit
-// The interpreter and compiler assembly code tries to lock using the fast path
-// of this algorithm. Make sure to update that code if the following function is
-// changed. The implementation is extremely sensitive to race condition. Be careful.
-
-void ObjectSynchronizer::enter(Handle obj, BasicLock* lock, JavaThread* current) {
-  if (obj->klass()->is_value_based()) {
-    handle_sync_on_value_based_class(obj, current);
-  }
-
-  if (UseBiasedLocking) {
-    BiasedLocking::revoke(current, obj);
-  }
-
-  markWord mark = obj->mark();
-  assert(!mark.has_bias_pattern(), "should not see bias pattern here");
-
-  if (mark.is_neutral()) {
-    // Anticipate successful CAS -- the ST of the displaced mark must
-    // be visible <= the ST performed by the CAS.
-    lock->set_displaced_header(mark);
-    if (mark == obj()->cas_set_mark(markWord::from_pointer(lock), mark)) {
-      return;
-    }
-    // Fall through to inflate() ...
-  } else if (mark.has_locker() &&
-             current->is_lock_owned((address)mark.locker())) {
-    assert(lock != mark.locker(), "must not re-lock the same lock");
-    assert(lock != (BasicLock*)obj->mark().value(), "don't relock with same BasicLock");
-    lock->set_displaced_header(markWord::from_pointer(NULL));
-    return;
-  }
-
-  // The object header will never be displaced to this lock,
-  // so it does not matter what the value is, except that it
-  // must be non-zero to avoid looking like a re-entrant lock,
-  // and must not look locked either.
-  lock->set_displaced_header(markWord::unused_mark());
-  // An async deflation can race after the inflate() call and before
-  // enter() can make the ObjectMonitor busy. enter() returns false if
-  // we have lost the race to async deflation and we simply try again.
-  while (true) {
-    ObjectMonitor* monitor = inflate(current, obj(), inflate_cause_monitor_enter);
-    if (monitor->enter(current)) {
-      return;
-    }
-  }
-}
-
-void ObjectSynchronizer::exit(oop object, BasicLock* lock, JavaThread* current) {
-  markWord mark = object->mark();
-  // We cannot check for Biased Locking if we are racing an inflation.
-  assert(mark == markWord::INFLATING() ||
-         !mark.has_bias_pattern(), "should not see bias pattern here");
-
-  markWord dhw = lock->displaced_header();
-  if (dhw.value() == 0) {
-    // If the displaced header is NULL, then this exit matches up with
-    // a recursive enter. No real work to do here except for diagnostics.
-#ifndef PRODUCT
-    if (mark != markWord::INFLATING()) {
-      // Only do diagnostics if we are not racing an inflation. Simply
-      // exiting a recursive enter of a Java Monitor that is being
-      // inflated is safe; see the has_monitor() comment below.
-      assert(!mark.is_neutral(), "invariant");
-      assert(!mark.has_locker() ||
-             current->is_lock_owned((address)mark.locker()), "invariant");
-      if (mark.has_monitor()) {
-        // The BasicLock's displaced_header is marked as a recursive
-        // enter and we have an inflated Java Monitor (ObjectMonitor).
-        // This is a special case where the Java Monitor was inflated
-        // after this thread entered the stack-lock recursively. When a
-        // Java Monitor is inflated, we cannot safely walk the Java
-        // Monitor owner's stack and update the BasicLocks because a
-        // Java Monitor can be asynchronously inflated by a thread that
-        // does not own the Java Monitor.
-        ObjectMonitor* m = mark.monitor();
-        assert(m->object()->mark() == mark, "invariant");
-        assert(m->is_entered(current), "invariant");
-      }
-    }
-#endif
-    return;
-  }
-
-  if (mark == markWord::from_pointer(lock)) {
-    // If the object is stack-locked by the current thread, try to
-    // swing the displaced header from the BasicLock back to the mark.
-    assert(dhw.is_neutral(), "invariant");
-    if (object->cas_set_mark(dhw, mark) == mark) {
-      return;
-    }
-  }
-
-  // We have to take the slow-path of possible inflation and then exit.
-  // The ObjectMonitor* can't be async deflated until ownership is
-  // dropped inside exit() and the ObjectMonitor* must be !is_busy().
-  ObjectMonitor* monitor = inflate(current, object, inflate_cause_vm_internal);
-  monitor->exit(current);
-}
-
-// -----------------------------------------------------------------------------
-// Class Loader  support to workaround deadlocks on the class loader lock objects
-// Also used by GC
-// complete_exit()/reenter() are used to wait on a nested lock
-// i.e. to give up an outer lock completely and then re-enter
-// Used when holding nested locks - lock acquisition order: lock1 then lock2
-//  1) complete_exit lock1 - saving recursion count
-//  2) wait on lock2
-//  3) when notified on lock2, unlock lock2
-//  4) reenter lock1 with original recursion count
-//  5) lock lock2
-// NOTE: must use heavy weight monitor to handle complete_exit/reenter()
-intx ObjectSynchronizer::complete_exit(Handle obj, JavaThread* current) {
-  if (UseBiasedLocking) {
-    BiasedLocking::revoke(current, obj);
-    assert(!obj->mark().has_bias_pattern(), "biases should be revoked by now");
-  }
-
-  // The ObjectMonitor* can't be async deflated until ownership is
-  // dropped inside exit() and the ObjectMonitor* must be !is_busy().
-  ObjectMonitor* monitor = inflate(current, obj(), inflate_cause_vm_internal);
-  intptr_t ret_code = monitor->complete_exit(current);
-  return ret_code;
-}
-
-// NOTE: must use heavy weight monitor to handle complete_exit/reenter()
-void ObjectSynchronizer::reenter(Handle obj, intx recursions, JavaThread* current) {
-  if (UseBiasedLocking) {
-    BiasedLocking::revoke(current, obj);
-    assert(!obj->mark().has_bias_pattern(), "biases should be revoked by now");
-  }
-
-  // An async deflation can race after the inflate() call and before
-  // reenter() -> enter() can make the ObjectMonitor busy. reenter() ->
-  // enter() returns false if we have lost the race to async deflation
-  // and we simply try again.
-  while (true) {
-    ObjectMonitor* monitor = inflate(current, obj(), inflate_cause_vm_internal);
-    if (monitor->reenter(recursions, current)) {
-      return;
-    }
-  }
-}
-
-// -----------------------------------------------------------------------------
-// JNI locks on java objects
-// NOTE: must use heavy weight monitor to handle jni monitor enter
-void ObjectSynchronizer::jni_enter(Handle obj, JavaThread* current) {
-  if (obj->klass()->is_value_based()) {
-    handle_sync_on_value_based_class(obj, current);
-  }
-
-  // the current locking is from JNI instead of Java code
-  if (UseBiasedLocking) {
-    BiasedLocking::revoke(current, obj);
-    assert(!obj->mark().has_bias_pattern(), "biases should be revoked by now");
-  }
-  current->set_current_pending_monitor_is_from_java(false);
-  // An async deflation can race after the inflate() call and before
-  // enter() can make the ObjectMonitor busy. enter() returns false if
-  // we have lost the race to async deflation and we simply try again.
-  while (true) {
-    ObjectMonitor* monitor = inflate(current, obj(), inflate_cause_jni_enter);
-    if (monitor->enter(current)) {
-      break;
-    }
-  }
-  current->set_current_pending_monitor_is_from_java(true);
-}
-
-// NOTE: must use heavy weight monitor to handle jni monitor exit
-void ObjectSynchronizer::jni_exit(oop obj, TRAPS) {
-  JavaThread* current = THREAD;
-  if (UseBiasedLocking) {
-    Handle h_obj(current, obj);
-    BiasedLocking::revoke(current, h_obj);
-    obj = h_obj();
-  }
-  assert(!obj->mark().has_bias_pattern(), "biases should be revoked by now");
-
-  // The ObjectMonitor* can't be async deflated until ownership is
-  // dropped inside exit() and the ObjectMonitor* must be !is_busy().
-  ObjectMonitor* monitor = inflate(current, obj, inflate_cause_jni_exit);
-  // If this thread has locked the object, exit the monitor. We
-  // intentionally do not use CHECK on check_owner because we must exit the
-  // monitor even if an exception was already pending.
-  if (monitor->check_owner(THREAD)) {
-    monitor->exit(current);
-  }
-}
-
-// -----------------------------------------------------------------------------
 // Internal VM locks on java objects
 // standard constructor, allows locking failures
 ObjectLocker::ObjectLocker(Handle obj, JavaThread* thread) {
@@ -622,95 +369,18 @@ ObjectLocker::ObjectLocker(Handle obj, JavaThread* thread) {
   _obj = obj;
 
   if (_obj() != NULL) {
-    ObjectSynchronizer::enter(_obj, &_lock, _thread);
+    ObjectSynchronizer::BJL_lock(obj);
   }
 }
 
 ObjectLocker::~ObjectLocker() {
   if (_obj() != NULL) {
-    ObjectSynchronizer::exit(_obj(), &_lock, _thread);
+    ObjectSynchronizer::BJL_unlock();
   }
 }
 
 
 // -----------------------------------------------------------------------------
-//  Wait/Notify/NotifyAll
-// NOTE: must use heavy weight monitor to handle wait()
-int ObjectSynchronizer::wait(Handle obj, jlong millis, TRAPS) {
-  JavaThread* current = THREAD;
-  if (UseBiasedLocking) {
-    BiasedLocking::revoke(current, obj);
-    assert(!obj->mark().has_bias_pattern(), "biases should be revoked by now");
-  }
-  if (millis < 0) {
-    THROW_MSG_0(vmSymbols::java_lang_IllegalArgumentException(), "timeout value is negative");
-  }
-  // The ObjectMonitor* can't be async deflated because the _waiters
-  // field is incremented before ownership is dropped and decremented
-  // after ownership is regained.
-  ObjectMonitor* monitor = inflate(current, obj(), inflate_cause_wait);
-
-  DTRACE_MONITOR_WAIT_PROBE(monitor, obj(), current, millis);
-  monitor->wait(millis, true, THREAD); // Not CHECK as we need following code
-
-  // This dummy call is in place to get around dtrace bug 6254741.  Once
-  // that's fixed we can uncomment the following line, remove the call
-  // and change this function back into a "void" func.
-  // DTRACE_MONITOR_PROBE(waited, monitor, obj(), THREAD);
-  int ret_code = dtrace_waited_probe(monitor, obj, THREAD);
-  return ret_code;
-}
-
-// No exception are possible in this case as we only use this internally when locking is
-// correct and we have to wait until notified - so no interrupts or timeouts.
-void ObjectSynchronizer::wait_uninterruptibly(Handle obj, JavaThread* current) {
-  if (UseBiasedLocking) {
-    BiasedLocking::revoke(current, obj);
-    assert(!obj->mark().has_bias_pattern(), "biases should be revoked by now");
-  }
-  // The ObjectMonitor* can't be async deflated because the _waiters
-  // field is incremented before ownership is dropped and decremented
-  // after ownership is regained.
-  ObjectMonitor* monitor = inflate(current, obj(), inflate_cause_wait);
-  monitor->wait(0 /* wait-forever */, false /* not interruptible */, current);
-}
-
-void ObjectSynchronizer::notify(Handle obj, TRAPS) {
-  JavaThread* current = THREAD;
-  if (UseBiasedLocking) {
-    BiasedLocking::revoke(current, obj);
-    assert(!obj->mark().has_bias_pattern(), "biases should be revoked by now");
-  }
-
-  markWord mark = obj->mark();
-  if (mark.has_locker() && current->is_lock_owned((address)mark.locker())) {
-    // Not inflated so there can't be any waiters to notify.
-    return;
-  }
-  // The ObjectMonitor* can't be async deflated until ownership is
-  // dropped by the calling thread.
-  ObjectMonitor* monitor = inflate(current, obj(), inflate_cause_notify);
-  monitor->notify(CHECK);
-}
-
-// NOTE: see comment of notify()
-void ObjectSynchronizer::notifyall(Handle obj, TRAPS) {
-  JavaThread* current = THREAD;
-  if (UseBiasedLocking) {
-    BiasedLocking::revoke(current, obj);
-    assert(!obj->mark().has_bias_pattern(), "biases should be revoked by now");
-  }
-
-  markWord mark = obj->mark();
-  if (mark.has_locker() && current->is_lock_owned((address)mark.locker())) {
-    // Not inflated so there can't be any waiters to notify.
-    return;
-  }
-  // The ObjectMonitor* can't be async deflated until ownership is
-  // dropped by the calling thread.
-  ObjectMonitor* monitor = inflate(current, obj(), inflate_cause_notify);
-  monitor->notifyAll(CHECK);
-}
 
 // -----------------------------------------------------------------------------
 // Hash Code handling
@@ -982,34 +652,6 @@ intptr_t ObjectSynchronizer::identity_hash_value_for(Handle obj) {
   return FastHashCode(Thread::current(), obj());
 }
 
-
-bool ObjectSynchronizer::current_thread_holds_lock(JavaThread* current,
-                                                   Handle h_obj) {
-  if (UseBiasedLocking) {
-    BiasedLocking::revoke(current, h_obj);
-    assert(!h_obj->mark().has_bias_pattern(), "biases should be revoked by now");
-  }
-
-  assert(current == JavaThread::current(), "Can only be called on current thread");
-  oop obj = h_obj();
-
-  markWord mark = read_stable_mark(obj);
-
-  // Uncontended case, header points to stack
-  if (mark.has_locker()) {
-    return current->is_lock_owned((address)mark.locker());
-  }
-  // Contended case, header points to ObjectMonitor (tagged pointer)
-  if (mark.has_monitor()) {
-    // The first stage of async deflation does not affect any field
-    // used by this comparison so the ObjectMonitor* is usable here.
-    ObjectMonitor* monitor = mark.monitor();
-    return monitor->is_entered(current) != 0;
-  }
-  // Unlocked case, header in place
-  assert(mark.is_neutral(), "sanity check");
-  return false;
-}
 
 // FIXME: jvmti should call this
 JavaThread* ObjectSynchronizer::get_lock_owner(ThreadsList * t_list, Handle h_obj) {
@@ -1594,22 +1236,6 @@ const char* ObjectSynchronizer::inflate_cause_name(const InflateCause cause) {
 
 //------------------------------------------------------------------------------
 // Debugging code
-
-u_char* ObjectSynchronizer::get_gvars_addr() {
-  return (u_char*)&GVars;
-}
-
-u_char* ObjectSynchronizer::get_gvars_hc_sequence_addr() {
-  return (u_char*)&GVars.hc_sequence;
-}
-
-size_t ObjectSynchronizer::get_gvars_size() {
-  return sizeof(SharedGlobals);
-}
-
-u_char* ObjectSynchronizer::get_gvars_stw_random_addr() {
-  return (u_char*)&GVars.stw_random;
-}
 
 // Do the final audit and print of ObjectMonitor stats; must be done
 // by the VMThread at VM exit time.

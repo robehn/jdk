@@ -981,12 +981,10 @@ void InterpreterMacroAssembler::narrow(Register result) {
 void InterpreterMacroAssembler::remove_activation(
         TosState state,
         Register ret_addr,
-        bool throw_monitor_exception,
-        bool install_monitor_exception,
         bool notify_jvmdi) {
   // Note: Registers rdx xmm0 may be in use for the
   // result check if synchronized method
-  Label unlocked, unlock, no_unlock;
+  Label not_synchronized;
 
   const Register rthread = LP64_ONLY(r15_thread) NOT_LP64(rcx);
   const Register robj    = LP64_ONLY(c_rarg1) NOT_LP64(rdx);
@@ -1011,128 +1009,23 @@ void InterpreterMacroAssembler::remove_activation(
   pop(state);
   bind(fast_path);
 
-  // get the value of _do_not_unlock_if_synchronized into rdx
-  const Address do_not_unlock_if_synchronized(rthread,
-    in_bytes(JavaThread::do_not_unlock_if_synchronized_offset()));
-  movbool(rbx, do_not_unlock_if_synchronized);
-  movbool(do_not_unlock_if_synchronized, false); // reset the flag
 
  // get method access flags
   movptr(rcx, Address(rbp, frame::interpreter_frame_method_offset * wordSize));
   movl(rcx, Address(rcx, Method::access_flags_offset()));
   testl(rcx, JVM_ACC_SYNCHRONIZED);
-  jcc(Assembler::zero, unlocked);
-
-  // Don't unlock anything if the _do_not_unlock_if_synchronized flag
-  // is set.
-  testbool(rbx);
-  jcc(Assembler::notZero, no_unlock);
+  jcc(Assembler::zero, not_synchronized);
 
   // unlock monitor
+  // pop(state);
+
   push(state); // save result
-
-  // BasicObjectLock will be first in list, since this is a
-  // synchronized method. However, need to check that the object has
-  // not been unlocked by an explicit monitorexit bytecode.
-  const Address monitor(rbp, frame::interpreter_frame_initial_sp_offset *
-                        wordSize - (int) sizeof(BasicObjectLock));
-  // We use c_rarg1/rdx so that if we go slow path it will be the correct
-  // register for unlock_object to pass to VM directly
-  lea(robj, monitor); // address of first monitor
-
-  movptr(rax, Address(robj, BasicObjectLock::obj_offset_in_bytes()));
-  testptr(rax, rax);
-  jcc(Assembler::notZero, unlock);
-
-  pop(state);
-  if (throw_monitor_exception) {
-    // Entry already unlocked, need to throw exception
-    NOT_LP64(empty_FPU_stack();)  // remove possible return value from FPU-stack, otherwise stack could overflow
-    call_VM(noreg, CAST_FROM_FN_PTR(address,
-                   InterpreterRuntime::throw_illegal_monitor_state_exception));
-    should_not_reach_here();
-  } else {
-    // Monitor already unlocked during a stack unroll. If requested,
-    // install an illegal_monitor_state_exception.  Continue with
-    // stack unrolling.
-    if (install_monitor_exception) {
-      NOT_LP64(empty_FPU_stack();)
-      call_VM(noreg, CAST_FROM_FN_PTR(address,
-                     InterpreterRuntime::new_illegal_monitor_state_exception));
-    }
-    jmp(unlocked);
-  }
-
-  bind(unlock);
-  unlock_object(robj);
+  unlock_object();
   pop(state);
 
   // Check that for block-structured locking (i.e., that all locked
   // objects has been unlocked)
-  bind(unlocked);
-
-  // rax, rdx: Might contain return value
-
-  // Check that all monitors are unlocked
-  {
-    Label loop, exception, entry, restart;
-    const int entry_size = frame::interpreter_frame_monitor_size() * wordSize;
-    const Address monitor_block_top(
-        rbp, frame::interpreter_frame_monitor_block_top_offset * wordSize);
-    const Address monitor_block_bot(
-        rbp, frame::interpreter_frame_initial_sp_offset * wordSize);
-
-    bind(restart);
-    // We use c_rarg1 so that if we go slow path it will be the correct
-    // register for unlock_object to pass to VM directly
-    movptr(rmon, monitor_block_top); // points to current entry, starting
-                                  // with top-most entry
-    lea(rbx, monitor_block_bot);  // points to word before bottom of
-                                  // monitor block
-    jmp(entry);
-
-    // Entry already locked, need to throw exception
-    bind(exception);
-
-    if (throw_monitor_exception) {
-      // Throw exception
-      NOT_LP64(empty_FPU_stack();)
-      MacroAssembler::call_VM(noreg,
-                              CAST_FROM_FN_PTR(address, InterpreterRuntime::
-                                   throw_illegal_monitor_state_exception));
-      should_not_reach_here();
-    } else {
-      // Stack unrolling. Unlock object and install illegal_monitor_exception.
-      // Unlock does not block, so don't have to worry about the frame.
-      // We don't have to preserve c_rarg1 since we are going to throw an exception.
-
-      push(state);
-      mov(robj, rmon);   // nop if robj and rmon are the same
-      unlock_object(robj);
-      pop(state);
-
-      if (install_monitor_exception) {
-        NOT_LP64(empty_FPU_stack();)
-        call_VM(noreg, CAST_FROM_FN_PTR(address,
-                                        InterpreterRuntime::
-                                        new_illegal_monitor_state_exception));
-      }
-
-      jmp(restart);
-    }
-
-    bind(loop);
-    // check if current entry is used
-    cmpptr(Address(rmon, BasicObjectLock::obj_offset_in_bytes()), (int32_t) NULL);
-    jcc(Assembler::notEqual, exception);
-
-    addptr(rmon, entry_size); // otherwise advance to next entry
-    bind(entry);
-    cmpptr(rmon, rbx); // check if bottom reached
-    jcc(Assembler::notEqual, loop); // if not at bottom then check this entry
-  }
-
-  bind(no_unlock);
+  bind(not_synchronized);
 
   // jvmti support
   if (notify_jvmdi) {
@@ -1197,110 +1090,7 @@ void InterpreterMacroAssembler::lock_object(Register lock_reg) {
   assert(lock_reg == LP64_ONLY(c_rarg1) NOT_LP64(rdx),
          "The argument is only for looks. It must be c_rarg1");
 
-  if (UseHeavyMonitors) {
-    call_VM(noreg,
-            CAST_FROM_FN_PTR(address, InterpreterRuntime::monitorenter),
-            lock_reg);
-  } else {
-    Label done;
-
-    const Register swap_reg = rax; // Must use rax for cmpxchg instruction
-    const Register tmp_reg = rbx; // Will be passed to biased_locking_enter to avoid a
-                                  // problematic case where tmp_reg = no_reg.
-    const Register obj_reg = LP64_ONLY(c_rarg3) NOT_LP64(rcx); // Will contain the oop
-    const Register rklass_decode_tmp = LP64_ONLY(rscratch1) NOT_LP64(noreg);
-
-    const int obj_offset = BasicObjectLock::obj_offset_in_bytes();
-    const int lock_offset = BasicObjectLock::lock_offset_in_bytes ();
-    const int mark_offset = lock_offset +
-                            BasicLock::displaced_header_offset_in_bytes();
-
-    Label slow_case;
-
-    // Load object pointer into obj_reg
-    movptr(obj_reg, Address(lock_reg, obj_offset));
-
-    if (DiagnoseSyncOnValueBasedClasses != 0) {
-      load_klass(tmp_reg, obj_reg, rklass_decode_tmp);
-      movl(tmp_reg, Address(tmp_reg, Klass::access_flags_offset()));
-      testl(tmp_reg, JVM_ACC_IS_VALUE_BASED_CLASS);
-      jcc(Assembler::notZero, slow_case);
-    }
-
-    if (UseBiasedLocking) {
-      biased_locking_enter(lock_reg, obj_reg, swap_reg, tmp_reg, rklass_decode_tmp, false, done, &slow_case);
-    }
-
-    // Load immediate 1 into swap_reg %rax
-    movl(swap_reg, (int32_t)1);
-
-    // Load (object->mark() | 1) into swap_reg %rax
-    orptr(swap_reg, Address(obj_reg, oopDesc::mark_offset_in_bytes()));
-
-    // Save (object->mark() | 1) into BasicLock's displaced header
-    movptr(Address(lock_reg, mark_offset), swap_reg);
-
-    assert(lock_offset == 0,
-           "displaced header must be first word in BasicObjectLock");
-
-    lock();
-    cmpxchgptr(lock_reg, Address(obj_reg, oopDesc::mark_offset_in_bytes()));
-    if (PrintBiasedLockingStatistics) {
-      cond_inc32(Assembler::zero,
-                 ExternalAddress((address) BiasedLocking::fast_path_entry_count_addr()));
-    }
-    jcc(Assembler::zero, done);
-
-    const int zero_bits = LP64_ONLY(7) NOT_LP64(3);
-
-    // Fast check for recursive lock.
-    //
-    // Can apply the optimization only if this is a stack lock
-    // allocated in this thread. For efficiency, we can focus on
-    // recently allocated stack locks (instead of reading the stack
-    // base and checking whether 'mark' points inside the current
-    // thread stack):
-    //  1) (mark & zero_bits) == 0, and
-    //  2) rsp <= mark < mark + os::pagesize()
-    //
-    // Warning: rsp + os::pagesize can overflow the stack base. We must
-    // neither apply the optimization for an inflated lock allocated
-    // just above the thread stack (this is why condition 1 matters)
-    // nor apply the optimization if the stack lock is inside the stack
-    // of another thread. The latter is avoided even in case of overflow
-    // because we have guard pages at the end of all stacks. Hence, if
-    // we go over the stack base and hit the stack of another thread,
-    // this should not be in a writeable area that could contain a
-    // stack lock allocated by that thread. As a consequence, a stack
-    // lock less than page size away from rsp is guaranteed to be
-    // owned by the current thread.
-    //
-    // These 3 tests can be done by evaluating the following
-    // expression: ((mark - rsp) & (zero_bits - os::vm_page_size())),
-    // assuming both stack pointer and pagesize have their
-    // least significant bits clear.
-    // NOTE: the mark is in swap_reg %rax as the result of cmpxchg
-    subptr(swap_reg, rsp);
-    andptr(swap_reg, zero_bits - os::vm_page_size());
-
-    // Save the test result, for recursive case, the result is zero
-    movptr(Address(lock_reg, mark_offset), swap_reg);
-
-    if (PrintBiasedLockingStatistics) {
-      cond_inc32(Assembler::zero,
-                 ExternalAddress((address) BiasedLocking::fast_path_entry_count_addr()));
-    }
-    jcc(Assembler::zero, done);
-
-    bind(slow_case);
-
-    // Call the runtime routine for slow case
-    call_VM(noreg,
-            CAST_FROM_FN_PTR(address, InterpreterRuntime::monitorenter),
-            lock_reg);
-
-    bind(done);
-  }
+    call_VM(noreg, CAST_FROM_FN_PTR(address, InterpreterRuntime::monitorenter), lock_reg);
 }
 
 
@@ -1316,61 +1106,8 @@ void InterpreterMacroAssembler::lock_object(Register lock_reg) {
 //      c_rarg0, c_rarg1, c_rarg2, c_rarg3, ... (param regs)
 //      rscratch1 (scratch reg)
 // rax, rbx, rcx, rdx
-void InterpreterMacroAssembler::unlock_object(Register lock_reg) {
-  assert(lock_reg == LP64_ONLY(c_rarg1) NOT_LP64(rdx),
-         "The argument is only for looks. It must be c_rarg1");
-
-  if (UseHeavyMonitors) {
-    call_VM_leaf(CAST_FROM_FN_PTR(address, InterpreterRuntime::monitorexit), lock_reg);
-  } else {
-    Label done;
-
-    const Register swap_reg   = rax;  // Must use rax for cmpxchg instruction
-    const Register header_reg = LP64_ONLY(c_rarg2) NOT_LP64(rbx);  // Will contain the old oopMark
-    const Register obj_reg    = LP64_ONLY(c_rarg3) NOT_LP64(rcx);  // Will contain the oop
-
-    save_bcp(); // Save in case of exception
-
-    // Convert from BasicObjectLock structure to object and BasicLock
-    // structure Store the BasicLock address into %rax
-    lea(swap_reg, Address(lock_reg, BasicObjectLock::lock_offset_in_bytes()));
-
-    // Load oop into obj_reg(%c_rarg3)
-    movptr(obj_reg, Address(lock_reg, BasicObjectLock::obj_offset_in_bytes()));
-
-    // Free entry
-    movptr(Address(lock_reg, BasicObjectLock::obj_offset_in_bytes()), (int32_t)NULL_WORD);
-
-    if (UseBiasedLocking) {
-      biased_locking_exit(obj_reg, header_reg, done);
-    }
-
-    // Load the old header from BasicLock structure
-    movptr(header_reg, Address(swap_reg,
-                               BasicLock::displaced_header_offset_in_bytes()));
-
-    // Test for recursion
-    testptr(header_reg, header_reg);
-
-    // zero for recursive case
-    jcc(Assembler::zero, done);
-
-    // Atomic swap back the old header
-    lock();
-    cmpxchgptr(header_reg, Address(obj_reg, oopDesc::mark_offset_in_bytes()));
-
-    // zero for simple unlock of a stack-lock case
-    jcc(Assembler::zero, done);
-
-
-    // Call the runtime routine for slow case.
-    movptr(Address(lock_reg, BasicObjectLock::obj_offset_in_bytes()), obj_reg); // restore obj
-    call_VM_leaf(CAST_FROM_FN_PTR(address, InterpreterRuntime::monitorexit), lock_reg);
-
-    bind(done);
-
-    restore_bcp();
-  }
+void InterpreterMacroAssembler::unlock_object() {
+  call_VM_leaf(CAST_FROM_FN_PTR(address, InterpreterRuntime::monitorexit));
 }
 
 void InterpreterMacroAssembler::test_method_data_pointer(Register mdp,

@@ -2106,48 +2106,28 @@ JRT_LEAF(void, SharedRuntime::reguard_yellow_pages())
 JRT_END
 
 void SharedRuntime::monitor_enter_helper(oopDesc* obj, BasicLock* lock, JavaThread* current) {
-  if (!SafepointSynchronize::is_synchronizing()) {
-    // Only try quick_enter() if we're not trying to reach a safepoint
-    // so that the calling thread reaches the safepoint more quickly.
-    if (ObjectSynchronizer::quick_enter(obj, current, lock)) return;
-  }
-  // NO_ASYNC required because an async exception on the state transition destructor
-  // would leave you with the lock held and it would never be released.
-  // The normal monitorenter NullPointerException is thrown without acquiring a lock
-  // and the model is that an exception implies the method failed.
   JRT_BLOCK_NO_ASYNC
-  if (PrintBiasedLockingStatistics) {
-    Atomic::inc(BiasedLocking::slow_path_entry_count_addr());
-  }
   Handle h_obj(THREAD, obj);
-  ObjectSynchronizer::enter(h_obj, lock, current);
+  ObjectSynchronizer::BJL_lock(h_obj);
   assert(!HAS_PENDING_EXCEPTION, "Should have no exception here");
   JRT_BLOCK_END
 }
 
 // Handles the uncommon case in locking, i.e., contention or an inflated lock.
 JRT_BLOCK_ENTRY(void, SharedRuntime::complete_monitor_locking_C(oopDesc* obj, BasicLock* lock, JavaThread* current))
-  SharedRuntime::monitor_enter_helper(obj, lock, current);
+  Handle h_obj(current, obj);
+  ObjectSynchronizer::BJL_lock(h_obj);
 JRT_END
 
 void SharedRuntime::monitor_exit_helper(oopDesc* obj, BasicLock* lock, JavaThread* current) {
   assert(JavaThread::current() == current, "invariant");
   // Exit must be non-blocking, and therefore no exceptions can be thrown.
-  ExceptionMark em(current);
-  // The object could become unlocked through a JNI call, which we have no other checks for.
-  // Give a fatal message if CheckJNICalls. Otherwise we ignore it.
-  if (obj->is_unlocked()) {
-    if (CheckJNICalls) {
-      fatal("Object has been unlocked by JNI");
-    }
-    return;
-  }
-  ObjectSynchronizer::exit(obj, lock, current);
+  ObjectSynchronizer::BJL_unlock();
 }
 
 // Handles the uncommon cases of monitor unlocking in compiled code
 JRT_LEAF(void, SharedRuntime::complete_monitor_unlocking_C(oopDesc* obj, BasicLock* lock, JavaThread* current))
-  SharedRuntime::monitor_exit_helper(obj, lock, current);
+  ObjectSynchronizer::BJL_unlock();
 JRT_END
 
 #ifndef PRODUCT

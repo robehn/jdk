@@ -409,41 +409,17 @@ JRT_END
 
 JRT_BLOCK_ENTRY(void, OptoRuntime::monitor_notify_C(oopDesc* obj, JavaThread* current))
 
-  // Very few notify/notifyAll operations find any threads on the waitset, so
-  // the dominant fast-path is to simply return.
-  // Relatedly, it's critical that notify/notifyAll be fast in order to
-  // reduce lock hold times.
-  if (!SafepointSynchronize::is_synchronizing()) {
-    if (ObjectSynchronizer::quick_notify(obj, current, false)) {
-      return;
-    }
-  }
-
-  // This is the case the fast-path above isn't provisioned to handle.
-  // The fast-path is designed to handle frequently arising cases in an efficient manner.
-  // (The fast-path is just a degenerate variant of the slow-path).
-  // Perform the dreaded state transition and pass control into the slow-path.
   JRT_BLOCK;
   Handle h_obj(current, obj);
-  ObjectSynchronizer::notify(h_obj, CHECK);
+  ObjectSynchronizer::BJL_notify();
   JRT_BLOCK_END;
 JRT_END
 
 JRT_BLOCK_ENTRY(void, OptoRuntime::monitor_notifyAll_C(oopDesc* obj, JavaThread* current))
 
-  if (!SafepointSynchronize::is_synchronizing() ) {
-    if (ObjectSynchronizer::quick_notify(obj, current, true)) {
-      return;
-    }
-  }
-
-  // This is the case the fast-path above isn't provisioned to handle.
-  // The fast-path is designed to handle frequently arising cases in an efficient manner.
-  // (The fast-path is just a degenerate variant of the slow-path).
-  // Perform the dreaded state transition and pass control into the slow-path.
   JRT_BLOCK;
   Handle h_obj(current, obj);
-  ObjectSynchronizer::notifyall(h_obj, CHECK);
+  ObjectSynchronizer::BJL_notify_all();
   JRT_BLOCK_END;
 JRT_END
 

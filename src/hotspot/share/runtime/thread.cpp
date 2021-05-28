@@ -1026,8 +1026,6 @@ JavaThread::JavaThread() :
   _current_waiting_monitor(NULL),
   _Stalled(0),
 
-  _monitor_chunks(nullptr),
-
   _suspend_flags(0),
   _async_exception_condition(_no_async_condition),
   _pending_async_exception(nullptr),
@@ -1042,7 +1040,6 @@ JavaThread::JavaThread() :
   _terminated(_not_terminated),
   _in_deopt_handler(0),
   _doing_unsafe_access(false),
-  _do_not_unlock_if_synchronized(false),
   _jni_attach_state(_not_attaching_via_jni),
 #if INCLUDE_JVMCI
   _pending_deoptimization(-1),
@@ -1559,10 +1556,6 @@ JavaThread* JavaThread::active() {
 bool JavaThread::is_lock_owned(address adr) const {
   if (Thread::is_lock_owned(adr)) return true;
 
-  for (MonitorChunk* chunk = monitor_chunks(); chunk != NULL; chunk = chunk->next()) {
-    if (chunk->contains(adr)) return true;
-  }
-
   return false;
 }
 
@@ -1573,23 +1566,6 @@ oop JavaThread::exception_oop() const {
 void JavaThread::set_exception_oop(oop o) {
   Atomic::store(&_exception_oop, o);
 }
-
-void JavaThread::add_monitor_chunk(MonitorChunk* chunk) {
-  chunk->set_next(monitor_chunks());
-  set_monitor_chunks(chunk);
-}
-
-void JavaThread::remove_monitor_chunk(MonitorChunk* chunk) {
-  guarantee(monitor_chunks() != NULL, "must be non empty");
-  if (monitor_chunks() == chunk) {
-    set_monitor_chunks(chunk->next());
-  } else {
-    MonitorChunk* prev = monitor_chunks();
-    while (prev->next() != chunk) prev = prev->next();
-    prev->set_next(chunk->next());
-  }
-}
-
 
 // Asynchronous exceptions support
 //
@@ -1660,7 +1636,6 @@ void JavaThread::check_and_handle_async_exceptions() {
 
   if (condition == _async_unsafe_access_error && !has_pending_exception()) {
     // We may be at method entry which requires we save the do-not-unlock flag.
-    UnlockFlagSaver fs(this);
     switch (thread_state()) {
     case _thread_in_vm: {
       JavaThread* THREAD = this;
@@ -1969,13 +1944,6 @@ void JavaThread::oops_do_no_frames(OopClosure* f, CodeBlobClosure* cf) {
 
   assert((!has_last_Java_frame() && java_call_counter() == 0) ||
          (has_last_Java_frame() && java_call_counter() > 0), "wrong java_sp info!");
-
-  if (has_last_Java_frame()) {
-    // Traverse the monitor chunks
-    for (MonitorChunk* chunk = monitor_chunks(); chunk != NULL; chunk = chunk->next()) {
-      chunk->oops_do(f);
-    }
-  }
 
   assert(vframe_array_head() == NULL, "deopt in progress at a safepoint!");
   // If we have deferred set_locals there might be oops waiting to be
@@ -3688,22 +3656,7 @@ JavaThread *Threads::owning_thread_from_monitor_owner(ThreadsList * t_list,
   // Cannot assert on lack of success here since this function may be
   // used by code that is trying to report useful problem information
   // like deadlock detection.
-  if (UseHeavyMonitors) return NULL;
-
-  // If we didn't find a matching Java thread and we didn't force use of
-  // heavyweight monitors, then the owner is the stack address of the
-  // Lock Word in the owning Java thread's stack.
-  //
-  JavaThread* the_owner = NULL;
-  DO_JAVA_THREADS(t_list, q) {
-    if (q->is_lock_owned(owner)) {
-      the_owner = q;
-      break;
-    }
-  }
-
-  // cannot assert on lack of success here; see above comment
-  return the_owner;
+  return NULL;
 }
 
 class PrintOnClosure : public ThreadClosure {

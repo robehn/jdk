@@ -29,6 +29,7 @@
 #include "oops/markWord.hpp"
 #include "runtime/basicLock.hpp"
 #include "runtime/handles.hpp"
+#include "logging/log.hpp"
 #include "utilities/growableArray.hpp"
 
 class LogStream;
@@ -64,6 +65,19 @@ public:
 };
 
 class ObjectSynchronizer : AllStatic {
+ public:
+  static pthread_mutex_t BJL;
+  static pthread_cond_t BJL_COND;
+  static volatile Thread* _owner;
+  static volatile int _rec;
+  
+  static void BJL_wait();
+  static void BJL_notify();
+  static void BJL_notify_all();
+  static void BJL_lock(Handle obj);
+  static void BJL_unlock();
+
+
   friend class VMStructs;
 
  public:
@@ -84,37 +98,6 @@ class ObjectSynchronizer : AllStatic {
     LOG_WARNING    = 2
   } SyncDiagnosticOption;
 
-  // exit must be implemented non-blocking, since the compiler cannot easily handle
-  // deoptimization at monitor exit. Hence, it does not take a Handle argument.
-
-  // This is the "slow path" version of monitor enter and exit.
-  static void enter(Handle obj, BasicLock* lock, JavaThread* current);
-  static void exit(oop obj, BasicLock* lock, JavaThread* current);
-
-  // Used only to handle jni locks or other unmatched monitor enter/exit
-  // Internally they will use heavy weight monitor.
-  static void jni_enter(Handle obj, JavaThread* current);
-  static void jni_exit(oop obj, TRAPS);
-
-  // Handle all interpreter, compiler and jni cases
-  static int  wait(Handle obj, jlong millis, TRAPS);
-  static void notify(Handle obj, TRAPS);
-  static void notifyall(Handle obj, TRAPS);
-
-  static bool quick_notify(oopDesc* obj, JavaThread* current, bool All);
-  static bool quick_enter(oop obj, JavaThread* current, BasicLock* Lock);
-
-  // Special internal-use-only method for use by JVM infrastructure
-  // that needs to wait() on a java-level object but must not respond
-  // to interrupt requests and doesn't timeout.
-  static void wait_uninterruptibly(Handle obj, JavaThread* current);
-
-  // used by classloading to free classloader object lock,
-  // wait on an internal lock, and reclaim original lock
-  // with original recursion count
-  static intx complete_exit(Handle obj, JavaThread* current);
-  static void reenter (Handle obj, intx recursions, JavaThread* current);
-
   // Inflate light weight monitor to heavy weight monitor
   static ObjectMonitor* inflate(Thread* current, oop obj, const InflateCause cause);
   // This version is only for internal use
@@ -127,7 +110,7 @@ class ObjectSynchronizer : AllStatic {
   static intptr_t FastHashCode(Thread* current, oop obj);
 
   // java.lang.Thread support
-  static bool current_thread_holds_lock(JavaThread* current, Handle h_obj);
+  static bool owns_BJL(JavaThread* current, Handle h_obj);
 
   static JavaThread* get_lock_owner(ThreadsList * t_list, Handle h_obj);
 
@@ -186,24 +169,18 @@ class ObjectSynchronizer : AllStatic {
   static void handle_sync_on_value_based_class(Handle obj, JavaThread* current);
 };
 
-// ObjectLocker enforces balanced locking and can never throw an
-// IllegalMonitorStateException. However, a pending exception may
-// have to pass through, and we must also be able to deal with
-// asynchronous exceptions. The caller is responsible for checking
-// the thread's pending exception if needed.
 class ObjectLocker : public StackObj {
  private:
   JavaThread* _thread;
   Handle      _obj;
-  BasicLock   _lock;
  public:
   ObjectLocker(Handle obj, JavaThread* current);
   ~ObjectLocker();
 
   // Monitor behavior
-  void wait(TRAPS)  { ObjectSynchronizer::wait(_obj, 0, CHECK); } // wait forever
-  void notify_all(TRAPS)  { ObjectSynchronizer::notifyall(_obj, CHECK); }
-  void wait_uninterruptibly(JavaThread* current) { ObjectSynchronizer::wait_uninterruptibly(_obj, current); }
+  void wait(TRAPS)  { ObjectSynchronizer::BJL_wait(); } // wait forever
+  void notify_all(TRAPS)  { ObjectSynchronizer::BJL_notify_all(); }
+  void wait_uninterruptibly(JavaThread* current) { ObjectSynchronizer::BJL_wait(); }
 };
 
 #endif // SHARE_RUNTIME_SYNCHRONIZER_HPP

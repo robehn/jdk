@@ -74,7 +74,7 @@ char*  Arguments::_java_command                 = NULL;
 SystemProperty* Arguments::_system_properties   = NULL;
 const char*  Arguments::_gc_log_filename        = NULL;
 size_t Arguments::_conservative_max_heap_alignment = 0;
-Arguments::Mode Arguments::_mode                = _mixed;
+Arguments::Mode Arguments::_mode                = _int;
 bool   Arguments::_java_compiler                = false;
 bool   Arguments::_xdebug_mode                  = false;
 const char*  Arguments::_java_vendor_url_bug    = NULL;
@@ -4025,22 +4025,13 @@ jint Arguments::apply_ergo() {
   // Turn off biased locking for locking debug mode flags,
   // which are subtly different from each other but neither works with
   // biased locking
-  if (UseHeavyMonitors
-#ifdef COMPILER1
-      || !UseFastLocking
-#endif // COMPILER1
-#if INCLUDE_JVMCI
-      || !JVMCIUseFastLocking
-#endif
-    ) {
-    if (!FLAG_IS_DEFAULT(UseBiasedLocking) && UseBiasedLocking) {
-      // flag set to true on command line; warn the user that they
-      // can't enable biased locking here
-      warning("Biased Locking is not supported with locking debug flags"
-              "; ignoring UseBiasedLocking flag." );
-    }
-    UseBiasedLocking = false;
+  if (!FLAG_IS_DEFAULT(UseBiasedLocking) && UseBiasedLocking) {
+    // flag set to true on command line; warn the user that they
+    // can't enable biased locking here
+    warning("Biased Locking is not supported with locking debug flags"
+            "; ignoring UseBiasedLocking flag." );
   }
+  UseBiasedLocking = false;
 
 #ifdef ZERO
   // Clear flags not supported on zero.

@@ -1098,9 +1098,6 @@ const intx ObjectAlignmentInBytes = 8;
   product(bool, ErrorFileToStdout, false,                                   \
           "If true, error data is printed to stdout instead of a file")     \
                                                                             \
-  product(bool, UseHeavyMonitors, false,                                    \
-          "use heavyweight instead of lightweight Java monitors")           \
-                                                                            \
   product(bool, PrintStringTableStatistics, false,                          \
           "print statistics about the StringTable and SymbolTable")         \
                                                                             \

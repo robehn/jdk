@@ -554,10 +554,6 @@ void TemplateInterpreterGenerator::generate_stack_overflow_check(void) {
 void TemplateInterpreterGenerator::lock_method() {
   // synchronize method
   const Address access_flags(rbx, Method::access_flags_offset());
-  const Address monitor_block_top(
-        rbp,
-        frame::interpreter_frame_monitor_block_top_offset * wordSize);
-  const int entry_size = frame::interpreter_frame_monitor_size() * wordSize;
 
 #ifdef ASSERT
   {
@@ -593,13 +589,12 @@ void TemplateInterpreterGenerator::lock_method() {
     __ bind(done);
   }
 
-  // add space for monitor & lock
-  __ subptr(rsp, entry_size); // add space for a monitor entry
-  __ movptr(monitor_block_top, rsp);  // set new monitor block top
-  // store object
-  __ movptr(Address(rsp, BasicObjectLock::obj_offset_in_bytes()), rax);
   const Register lockreg = NOT_LP64(rdx) LP64_ONLY(c_rarg1);
-  __ movptr(lockreg, rsp); // object address
+  
+  // __ movptr(lockreg, rsp); // object address
+  // __ lock_object(lockreg);
+  
+  __ movptr(lockreg, rax); // object address
   __ lock_object(lockreg);
 }
 
@@ -797,18 +792,6 @@ address TemplateInterpreterGenerator::generate_native_entry(bool synchronized) {
   }
 #endif
 
-  // Since at this point in the method invocation the exception handler
-  // would try to exit the monitor of synchronized methods which hasn't
-  // been entered yet, we set the thread local variable
-  // _do_not_unlock_if_synchronized to true. The remove_activation will
-  // check this flag.
-
-  const Register thread1 = NOT_LP64(rax) LP64_ONLY(r15_thread);
-  NOT_LP64(__ get_thread(thread1));
-  const Address do_not_unlock_if_synchronized(thread1,
-        in_bytes(JavaThread::do_not_unlock_if_synchronized_offset()));
-  __ movbool(do_not_unlock_if_synchronized, true);
-
   // increment invocation count & check for overflow
   Label invocation_counter_overflow;
   if (inc_counter) {
@@ -819,10 +802,6 @@ address TemplateInterpreterGenerator::generate_native_entry(bool synchronized) {
   __ bind(continue_after_compile);
 
   bang_stack_shadow_pages(true);
-
-  // reset the _do_not_unlock_if_synchronized flag
-  NOT_LP64(__ get_thread(thread1));
-  __ movbool(do_not_unlock_if_synchronized, false);
 
   // check for synchronized methods
   // Must happen AFTER invocation_counter check and stack overflow check,
@@ -1183,33 +1162,7 @@ address TemplateInterpreterGenerator::generate_native_entry(bool synchronized) {
     __ jcc(Assembler::zero, L);
     // the code below should be shared with interpreter macro
     // assembler implementation
-    {
-      Label unlock;
-      // BasicObjectLock will be first in list, since this is a
-      // synchronized method. However, need to check that the object
-      // has not been unlocked by an explicit monitorexit bytecode.
-      const Address monitor(rbp,
-                            (intptr_t)(frame::interpreter_frame_initial_sp_offset *
-                                       wordSize - (int)sizeof(BasicObjectLock)));
-
-      const Register regmon = NOT_LP64(rdx) LP64_ONLY(c_rarg1);
-
-      // monitor expect in c_rarg1 for slow unlock path
-      __ lea(regmon, monitor); // address of first monitor
-
-      __ movptr(t, Address(regmon, BasicObjectLock::obj_offset_in_bytes()));
-      __ testptr(t, t);
-      __ jcc(Assembler::notZero, unlock);
-
-      // Entry already unlocked, need to throw exception
-      __ MacroAssembler::call_VM(noreg,
-                                 CAST_FROM_FN_PTR(address,
-                   InterpreterRuntime::throw_illegal_monitor_state_exception));
-      __ should_not_reach_here();
-
-      __ bind(unlock);
-      __ unlock_object(regmon);
-    }
+    __ unlock_object();
     __ bind(L);
   }
 
@@ -1347,18 +1300,6 @@ address TemplateInterpreterGenerator::generate_normal_entry(bool synchronized) {
   }
 #endif
 
-  // Since at this point in the method invocation the exception
-  // handler would try to exit the monitor of synchronized methods
-  // which hasn't been entered yet, we set the thread local variable
-  // _do_not_unlock_if_synchronized to true. The remove_activation
-  // will check this flag.
-
-  const Register thread = NOT_LP64(rax) LP64_ONLY(r15_thread);
-  NOT_LP64(__ get_thread(thread));
-  const Address do_not_unlock_if_synchronized(thread,
-        in_bytes(JavaThread::do_not_unlock_if_synchronized_offset()));
-  __ movbool(do_not_unlock_if_synchronized, true);
-
   __ profile_parameters_type(rax, rcx, rdx);
   // increment invocation count & check for overflow
   Label invocation_counter_overflow;
@@ -1371,10 +1312,6 @@ address TemplateInterpreterGenerator::generate_normal_entry(bool synchronized) {
 
   // check for synchronized interpreted methods
   bang_stack_shadow_pages(false);
-
-  // reset the _do_not_unlock_if_synchronized flag
-  NOT_LP64(__ get_thread(thread));
-  __ movbool(do_not_unlock_if_synchronized, false);
 
   // check for synchronized methods
   // Must happen AFTER invocation_counter check and stack overflow check,
@@ -1529,8 +1466,6 @@ void TemplateInterpreterGenerator::generate_throw_exception() {
                           thread, rax, rlocals);
 
     __ remove_activation(vtos, rdx,
-                         /* throw_monitor_exception */ false,
-                         /* install_monitor_exception */ false,
                          /* notify_jvmdi */ false);
 
     // Inform deoptimization that it is responsible for restoring
@@ -1546,8 +1481,6 @@ void TemplateInterpreterGenerator::generate_throw_exception() {
   }
 
   __ remove_activation(vtos, rdx, /* rdx result (retaddr) is not used */
-                       /* throw_monitor_exception */ false,
-                       /* install_monitor_exception */ false,
                        /* notify_jvmdi */ false);
 
   // Finish with popframe handling
@@ -1628,7 +1561,7 @@ void TemplateInterpreterGenerator::generate_throw_exception() {
   NOT_LP64(__ get_thread(thread));
   __ movptr(Address(thread, JavaThread::vm_result_offset()), rax);
   // remove the activation (without doing throws on illegalMonitorExceptions)
-  __ remove_activation(vtos, rdx, false, true, false);
+  __ remove_activation(vtos, rdx, false);
   // restore exception
   NOT_LP64(__ get_thread(thread));
   __ get_vm_result(rax, thread);
@@ -1674,10 +1607,7 @@ address TemplateInterpreterGenerator::generate_earlyret_entry_for(TosState state
   // Clear the earlyret state
   __ movl(cond_addr, JvmtiThreadState::earlyret_inactive);
 
-  __ remove_activation(state, rsi,
-                       false, /* throw_monitor_exception */
-                       false, /* install_monitor_exception */
-                       true); /* notify_jvmdi */
+  __ remove_activation(state, rsi, true); /* notify_jvmdi */
   __ jmp(rsi);
 
   return entry;

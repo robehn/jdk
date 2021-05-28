@@ -473,15 +473,15 @@ static void double_lock_wait(JavaThread* thread, Handle lockObject) {
 
   assert(lockObject() != NULL, "lockObject must be non-NULL");
   bool calledholdinglock
-      = ObjectSynchronizer::current_thread_holds_lock(thread, lockObject);
+      = ObjectSynchronizer::owns_BJL(thread, lockObject);
   assert(calledholdinglock, "must hold lock for notify");
   assert(!is_parallelCapable(lockObject), "lockObject must not be parallelCapable");
   // These don't throw exceptions.
-  ObjectSynchronizer::notifyall(lockObject, thread);
-  intx recursions = ObjectSynchronizer::complete_exit(lockObject, thread);
+  ObjectSynchronizer::BJL_notify_all();
+  ObjectSynchronizer::BJL_unlock();
   SystemDictionary_lock->wait();
   SystemDictionary_lock->unlock();
-  ObjectSynchronizer::reenter(lockObject, recursions, thread);
+  ObjectSynchronizer::BJL_lock(lockObject);
   SystemDictionary_lock->lock();
 }
 
@@ -1401,7 +1401,7 @@ void SystemDictionary::define_instance_class(InstanceKlass* k, Handle class_load
   // find_or_define_instance_class to get here, we have a timing
   // hole with systemDictionary updates and check_constraints
   if (!is_parallelCapable(class_loader)) {
-    assert(ObjectSynchronizer::current_thread_holds_lock(THREAD,
+    assert(ObjectSynchronizer::owns_BJL(THREAD->as_Java_thread(),
            get_loader_lock_or_null(class_loader)),
            "define called without lock");
   }

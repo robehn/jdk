@@ -228,14 +228,12 @@ class InterpreterMacroAssembler: public MacroAssembler {
   // In earlyReturn case we only want to skip throwing an exception
   // and installing an exception.
   void remove_activation(TosState state, Register ret_addr,
-                         bool throw_monitor_exception = true,
-                         bool install_monitor_exception = true,
                          bool notify_jvmdi = true);
   void get_method_counters(Register method, Register mcs, Label& skip);
 
   // Object locking
   void lock_object  (Register lock_reg);
-  void unlock_object(Register lock_reg);
+  void unlock_object();
 
   // Interpreter profiling operations
   void set_method_data_pointer_for_bcp();

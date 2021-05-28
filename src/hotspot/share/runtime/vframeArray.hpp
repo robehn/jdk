@@ -75,10 +75,6 @@ class vframeArrayElement {
 
   Method* method(void) const       { return _method; }
 
-  MonitorChunk* monitors(void) const { return _monitors; }
-
-  void free_monitors(JavaThread* jt);
-
   StackValueCollection* locals(void) const             { return _locals; }
 
   StackValueCollection* expressions(void) const        { return _expressions; }
@@ -209,12 +205,6 @@ class vframeArray: public CHeapObj<mtCompiler> {
 
   // Unpack the array on the stack passed in stack interval
   void unpack_to_stack(frame &unpack_frame, int exec_mode, int caller_actual_parameters);
-
-  // Deallocates monitor chunks allocated during deoptimization.
-  // This should be called when the array is not used anymore.
-  void deallocate_monitor_chunks();
-
-
 
   // Accessor for register map
   address register_location(int i) const;

@@ -772,9 +772,6 @@ class JavaThread: public Thread {
   }
 
  private:
-  MonitorChunk* _monitor_chunks;              // Contains the off stack monitors
-                                              // allocated during deoptimization
-                                              // and by JNI_MonitorEnter/Exit
 
   enum SuspendFlags {
     // NOTE: avoid using the sign-bit as cc generates different test code
@@ -900,7 +897,6 @@ class JavaThread: public Thread {
   jint                  _in_deopt_handler;       // count of deoptimization
                                                  // handlers thread is in
   volatile bool         _doing_unsafe_access;    // Thread may fault due to unsafe access
-  bool                  _do_not_unlock_if_synchronized;  // Do not unlock the receiver of a synchronized method (since it was
                                                          // never locked) when throwing an exception. Used by interpreter only.
 
   // JNI attach states:
@@ -1113,9 +1109,6 @@ class JavaThread: public Thread {
   bool doing_unsafe_access()                     { return _doing_unsafe_access; }
   void set_doing_unsafe_access(bool val)         { _doing_unsafe_access = val; }
 
-  bool do_not_unlock_if_synchronized()             { return _do_not_unlock_if_synchronized; }
-  void set_do_not_unlock_if_synchronized(bool val) { _do_not_unlock_if_synchronized = val; }
-
   SafepointMechanism::ThreadData* poll_data() { return &_poll_data; }
 
   void set_requires_cross_modify_fence(bool val) PRODUCT_RETURN NOT_PRODUCT({ _requires_cross_modify_fence = val; })
@@ -1231,11 +1224,6 @@ class JavaThread: public Thread {
     return is_in_stack_range_incl(adr, _stack_overflow_state.stack_reserved_zone_base());
   }
 
-  // Misc. accessors/mutators
-  void set_do_not_unlock(void)                   { _do_not_unlock_if_synchronized = true; }
-  void clr_do_not_unlock(void)                   { _do_not_unlock_if_synchronized = false; }
-  bool do_not_unlock(void)                       { return _do_not_unlock_if_synchronized; }
-
   // For assembly stub generation
   static ByteSize threadObj_offset()             { return byte_offset_of(JavaThread, _threadObj); }
   static ByteSize jni_environment_offset()       { return byte_offset_of(JavaThread, _jni_environment); }
@@ -1285,7 +1273,6 @@ class JavaThread: public Thread {
 
   static ByteSize suspend_flags_offset()         { return byte_offset_of(JavaThread, _suspend_flags); }
 
-  static ByteSize do_not_unlock_if_synchronized_offset() { return byte_offset_of(JavaThread, _do_not_unlock_if_synchronized); }
   static ByteSize should_post_on_exceptions_flag_offset() {
     return byte_offset_of(JavaThread, _should_post_on_exceptions_flag);
   }
@@ -1332,12 +1319,8 @@ class JavaThread: public Thread {
   void set_depth_first_number(int dfn) { _depth_first_number = dfn; }
 
  private:
-  void set_monitor_chunks(MonitorChunk* monitor_chunks) { _monitor_chunks = monitor_chunks; }
 
  public:
-  MonitorChunk* monitor_chunks() const           { return _monitor_chunks; }
-  void add_monitor_chunk(MonitorChunk* chunk);
-  void remove_monitor_chunk(MonitorChunk* chunk);
   bool in_deopt_handler() const                  { return _in_deopt_handler > 0; }
   void inc_in_deopt_handler()                    { _in_deopt_handler++; }
   void dec_in_deopt_handler() {
@@ -1698,21 +1681,6 @@ class Threads: AllStatic {
   static void deoptimized_wrt_marked_nmethods();
 
   struct Test;                  // For private gtest access.
-};
-
-class UnlockFlagSaver {
-  private:
-    JavaThread* _thread;
-    bool _do_not_unlock;
-  public:
-    UnlockFlagSaver(JavaThread* t) {
-      _thread = t;
-      _do_not_unlock = t->do_not_unlock_if_synchronized();
-      t->set_do_not_unlock_if_synchronized(false);
-    }
-    ~UnlockFlagSaver() {
-      _thread->set_do_not_unlock_if_synchronized(_do_not_unlock);
-    }
 };
 
 #endif // SHARE_RUNTIME_THREAD_HPP

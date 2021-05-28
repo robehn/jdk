@@ -48,15 +48,6 @@
 
 int vframeArrayElement:: bci(void) const { return (_bci == SynchronizationEntryBCI ? 0 : _bci); }
 
-void vframeArrayElement::free_monitors(JavaThread* jt) {
-  if (_monitors != NULL) {
-     MonitorChunk* chunk = _monitors;
-     _monitors = NULL;
-     jt->remove_monitor_chunk(chunk);
-     delete chunk;
-  }
-}
-
 void vframeArrayElement::fill_in(compiledVFrame* vf, bool realloc_failures) {
 
 // Copy the information from the compiled vframe to the
@@ -70,38 +61,6 @@ void vframeArrayElement::fill_in(compiledVFrame* vf, bool realloc_failures) {
 #endif
 
   int index;
-
-  {
-    Thread* current_thread = Thread::current();
-    ResourceMark rm(current_thread);
-    HandleMark hm(current_thread);
-
-    // Get the monitors off-stack
-
-    GrowableArray<MonitorInfo*>* list = vf->monitors();
-    if (list->is_empty()) {
-      _monitors = NULL;
-    } else {
-
-      // Allocate monitor chunk
-      _monitors = new MonitorChunk(list->length());
-      vf->thread()->add_monitor_chunk(_monitors);
-
-      // Migrate the BasicLocks from the stack to the monitor chunk
-      for (index = 0; index < list->length(); index++) {
-        MonitorInfo* monitor = list->at(index);
-        assert(!monitor->owner_is_scalar_replaced() || realloc_failures, "object should be reallocated already");
-        BasicObjectLock* dest = _monitors->at(index);
-        if (monitor->owner_is_scalar_replaced()) {
-          dest->set_obj(NULL);
-        } else {
-          assert(monitor->owner() == NULL || (!monitor->owner()->is_unlocked() && !monitor->owner()->has_bias_pattern()), "object must be null or locked, and unbiased");
-          dest->set_obj(monitor->owner());
-          monitor->lock()->move_to(monitor->owner(), dest->lock());
-        }
-      }
-    }
-  }
 
   // Convert the vframe locals and expressions to off stack
   // values. Because we will not gc all oops can be converted to
@@ -281,7 +240,7 @@ void vframeArrayElement::unpack_on_stack(int caller_actual_parameters,
   assert(method() != NULL, "method must exist");
   int temps = expressions()->size();
 
-  int locks = monitors() == NULL ? 0 : monitors()->number_of_monitors();
+  int locks = 0;
 
   Interpreter::layout_activation(method(),
                                  temps + callee_parameters,
@@ -477,7 +436,7 @@ int vframeArrayElement::on_stack_size(int callee_parameters,
                                       bool is_top_frame,
                                       int popframe_extra_stack_expression_els) const {
   assert(method()->max_locals() == locals()->size(), "just checking");
-  int locks = monitors() == NULL ? 0 : monitors()->number_of_monitors();
+  int locks = 0;
   int temps = expressions()->size();
   return Interpreter::size_activation(method()->max_stack(),
                                       temps + callee_parameters,
@@ -610,14 +569,6 @@ void vframeArray::unpack_to_stack(frame &unpack_frame, int exec_mode, int caller
     }
     caller_frame = elem->iframe();
     caller_actual_parameters = callee_parameters;
-  }
-  deallocate_monitor_chunks();
-}
-
-void vframeArray::deallocate_monitor_chunks() {
-  JavaThread* jt = JavaThread::current();
-  for (int index = 0; index < frames(); index++ ) {
-     element(index)->free_monitors(jt);
   }
 }
 

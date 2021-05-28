@@ -112,15 +112,6 @@ public:
   oop callee_receiver(Symbol* signature) {
     return _last_frame.interpreter_callee_receiver(signature);
   }
-  BasicObjectLock* monitor_begin() const {
-    return _last_frame.interpreter_frame_monitor_begin();
-  }
-  BasicObjectLock* monitor_end() const {
-    return _last_frame.interpreter_frame_monitor_end();
-  }
-  BasicObjectLock* next_monitor(BasicObjectLock* current) const {
-    return _last_frame.next_monitor_in_interpreter_frame(current);
-  }
 
   frame& get_frame()                             { return _last_frame; }
 };
@@ -471,21 +462,7 @@ JRT_ENTRY(address, InterpreterRuntime::exception_handler_for_exception(JavaThrea
     // failed. Unconditionally pop the frame.
     current->dec_frames_to_pop_failed_realloc();
     current->set_vm_result(h_exception());
-    // If the method is synchronized we already unlocked the monitor
-    // during deoptimization so the interpreter needs to skip it when
-    // the frame is popped.
-    current->set_do_not_unlock_if_synchronized(true);
-    return Interpreter::remove_activation_entry();
-  }
-
-  // Need to do this check first since when _do_not_unlock_if_synchronized
-  // is set, we don't want to trigger any classloading which may make calls
-  // into java, or surprisingly find a matching exception handler for bci 0
-  // since at this moment the method hasn't been "officially" entered yet.
-  if (current->do_not_unlock_if_synchronized()) {
-    ResourceMark rm;
-    assert(current_bci == 0,  "bci isn't zero for do_not_unlock_if_synchronized");
-    current->set_vm_result(exception);
+    
     return Interpreter::remove_activation_entry();
   }
 
@@ -723,42 +700,17 @@ void InterpreterRuntime::resolve_get_put(JavaThread* current, Bytecodes::Code by
 //%note synchronization_3
 
 //%note monitor_1
-JRT_ENTRY_NO_ASYNC(void, InterpreterRuntime::monitorenter(JavaThread* current, BasicObjectLock* elem))
-#ifdef ASSERT
-  current->last_frame().interpreter_frame_verify_monitor(elem);
-#endif
-  if (PrintBiasedLockingStatistics) {
-    Atomic::inc(BiasedLocking::slow_path_entry_count_addr());
-  }
-  Handle h_obj(current, elem->obj());
-  assert(Universe::heap()->is_in_or_null(h_obj()),
-         "must be NULL or an object");
-  ObjectSynchronizer::enter(h_obj, elem->lock(), current);
-  assert(Universe::heap()->is_in_or_null(elem->obj()),
-         "must be NULL or an object");
-#ifdef ASSERT
-  current->last_frame().interpreter_frame_verify_monitor(elem);
-#endif
+//
+// BIG JAVA LOCK
+
+JRT_ENTRY_NO_ASYNC(void, InterpreterRuntime::monitorenter(JavaThread* current, oopDesc* obj))
+    Handle h_obj = Handle(current, obj);
+    ObjectSynchronizer::BJL_lock(h_obj);
 JRT_END
 
-
-JRT_LEAF(void, InterpreterRuntime::monitorexit(BasicObjectLock* elem))
-  oop obj = elem->obj();
-  assert(Universe::heap()->is_in(obj), "must be an object");
-  // The object could become unlocked through a JNI call, which we have no other checks for.
-  // Give a fatal message if CheckJNICalls. Otherwise we ignore it.
-  if (obj->is_unlocked()) {
-    if (CheckJNICalls) {
-      fatal("Object has been unlocked by JNI");
-    }
-    return;
-  }
-  ObjectSynchronizer::exit(obj, elem->lock(), JavaThread::current());
-  // Free entry. If it is not cleared, the exception handling code will try to unlock the monitor
-  // again at method exit or in the case of an exception.
-  elem->set_obj(NULL);
+JRT_LEAF(void, InterpreterRuntime::monitorexit())
+    ObjectSynchronizer::BJL_unlock();
 JRT_END
-
 
 JRT_ENTRY(void, InterpreterRuntime::throw_illegal_monitor_state_exception(JavaThread* current))
   THROW(vmSymbols::java_lang_IllegalMonitorStateException());
@@ -1016,9 +968,6 @@ nmethod* InterpreterRuntime::frequency_counter_overflow(JavaThread* current, add
 
 JRT_ENTRY(nmethod*,
           InterpreterRuntime::frequency_counter_overflow_inner(JavaThread* current, address branch_bcp))
-  // use UnlockFlagSaver to clear and restore the _do_not_unlock_if_synchronized
-  // flag, in case this method triggers classloading which will call into Java.
-  UnlockFlagSaver fs(current);
 
   LastFrameAccessor last_frame(current);
   assert(last_frame.is_interpreted_frame(), "must come from interpreter");
@@ -1035,26 +984,6 @@ JRT_ENTRY(nmethod*,
     }
   }
 
-  if (osr_nm != NULL) {
-    // We may need to do on-stack replacement which requires that no
-    // monitors in the activation are biased because their
-    // BasicObjectLocks will need to migrate during OSR. Force
-    // unbiasing of all monitors in the activation now (even though
-    // the OSR nmethod might be invalidated) because we don't have a
-    // safepoint opportunity later once the migration begins.
-    if (UseBiasedLocking) {
-      ResourceMark rm;
-      GrowableArray<Handle>* objects_to_revoke = new GrowableArray<Handle>();
-      for( BasicObjectLock *kptr = last_frame.monitor_end();
-           kptr < last_frame.monitor_begin();
-           kptr = last_frame.next_monitor(kptr) ) {
-        if( kptr->obj() != NULL ) {
-          objects_to_revoke->append(Handle(current, kptr->obj()));
-        }
-      }
-      BiasedLocking::revoke(objects_to_revoke, current);
-    }
-  }
   return osr_nm;
 JRT_END
 
