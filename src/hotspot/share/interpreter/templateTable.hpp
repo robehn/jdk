@@ -281,6 +281,8 @@ class TemplateTable: AllStatic {
   static void invokehandle(int byte_no);
   static void fast_invokevfinal(int byte_no);
 
+  static void invoke_monitorenter();
+
   static void getfield_or_static(int byte_no, bool is_static, RewriteControl rc = may_rewrite);
   static void putfield_or_static(int byte_no, bool is_static, RewriteControl rc = may_rewrite);
 
@@ -303,6 +305,7 @@ class TemplateTable: AllStatic {
   static void athrow();
 
   static void monitorenter();
+  static void monitorenter2();
   static void monitorexit();
 
   static void wide();

@@ -232,7 +232,7 @@ class InterpreterMacroAssembler: public MacroAssembler {
   void get_method_counters(Register method, Register mcs, Label& skip);
 
   // Object locking
-  void lock_object  (Register lock_reg);
+  void lock_object(Register lock_reg);
   void unlock_object();
 
   // Interpreter profiling operations

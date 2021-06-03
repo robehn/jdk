@@ -77,7 +77,6 @@ class ObjectSynchronizer : AllStatic {
   static void BJL_lock(Handle obj);
   static void BJL_unlock();
 
-
   friend class VMStructs;
 
  public:

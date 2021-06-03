@@ -54,6 +54,7 @@
   /* commonly used class, package, module names */                                                \
   template(java_base,                                 "java.base")                                \
   template(java_lang_System,                          "java/lang/System")                         \
+  template(java_lang_Synchronizer,                    "java/lang/Synchronizer")                   \
   template(java_lang_Object,                          "java/lang/Object")                         \
   template(java_lang_Class,                           "java/lang/Class")                          \
   template(java_lang_Package,                         "java/lang/Package")                        \
@@ -367,6 +368,8 @@
   /* common method and field names */                                                             \
   template(object_initializer_name,                   "<init>")                                   \
   template(class_initializer_name,                    "<clinit>")                                 \
+  template(enter_method_name,                         "enter")                                    \
+  template(exit_method_name,                          "exit")                                     \
   template(println_name,                              "println")                                  \
   template(printStackTrace_name,                      "printStackTrace")                          \
   template(main_name,                                 "main")                                     \
@@ -376,7 +379,6 @@
   template(group_name,                                "group")                                    \
   template(daemon_name,                               "daemon")                                   \
   template(run_method_name,                           "run")                                      \
-  template(exit_method_name,                          "exit")                                     \
   template(add_method_name,                           "add")                                      \
   template(remove_method_name,                        "remove")                                   \
   template(parent_name,                               "parent")                                   \
@@ -741,8 +743,11 @@ class vmSymbols: AllStatic {
   static const int FIRST_SID = static_cast<int>(vmSymbolID::FIRST_SID); // inclusive lower limit
   static const int LAST_SID  = static_cast<int>(vmSymbolID::FIRST_SID); // inclusive upper limit
   static const int SID_LIMIT = static_cast<int>(vmSymbolID::SID_LIMIT); // exclusive upper limit
-
+  
  public:
+  static Method* _monitor_enter_method;
+  static Method* _monitor_exit_method;
+
   static constexpr bool is_valid_id(int id) {
     return (id >= FIRST_SID && id < SID_LIMIT);
   }

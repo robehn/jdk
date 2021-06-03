@@ -710,9 +710,28 @@ bool Thread::set_as_starting_thread() {
 
 static void initialize_class(Symbol* class_name, TRAPS) {
   Klass* klass = SystemDictionary::resolve_or_fail(class_name, true, CHECK);
-  InstanceKlass::cast(klass)->initialize(CHECK);
+  InstanceKlass* ik = InstanceKlass::cast(klass);
+  ik->initialize(CHECK);
 }
 
+static void initialize_monitor_enter_methods(TRAPS) {
+  Symbol* class_name = vmSymbols::java_lang_Synchronizer();
+  Klass* klass = SystemDictionary::resolve_or_fail(class_name, true, CHECK);
+  InstanceKlass* ik = InstanceKlass::cast(klass);
+
+  ik->initialize(CHECK);
+
+  vmSymbols::_monitor_enter_method = ik->lookup_method(
+     vmSymbols::enter_method_name(),
+     vmSymbols::void_int_signature()); // object_void_signature
+
+  vmSymbols::_monitor_exit_method = ik->lookup_method(
+     vmSymbols::enter_method_name(),
+     vmSymbols::void_int_signature()); // object_void_signature
+
+  assert(vmSymbols::_monitor_enter_method != NULL &&
+         vmSymbols::_monitor_exit_method != NULL, "Bad");
+}
 
 // Creates the initial ThreadGroup
 static Handle create_initial_thread_group(TRAPS) {
@@ -2601,6 +2620,10 @@ void Threads::initialize_java_lang_classes(JavaThread* main_thread, TRAPS) {
 
   // Initialize java_lang.System (needed before creating the thread)
   initialize_class(vmSymbols::java_lang_System(), CHECK);
+  
+  // XxX
+  initialize_monitor_enter_methods(CHECK);
+  
   // The VM creates & returns objects of this class. Make sure it's initialized.
   initialize_class(vmSymbols::java_lang_Class(), CHECK);
   initialize_class(vmSymbols::java_lang_ThreadGroup(), CHECK);
