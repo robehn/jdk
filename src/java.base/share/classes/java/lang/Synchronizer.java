@@ -44,17 +44,12 @@ public final class Synchronizer {
      * @param o lock o
      * @return stuff
      */
-    public static int enter(Object o) {
-        if (o != null)
-            return 0;
-        return 1;
+    public static void enter(Object o) {
     }
     /**
      * Dummy
      * @return stuff
      */
-    public static int exit() {
-        System.out.println("Hej");
-        return 0;
+    public static void exit() {
     }
 }

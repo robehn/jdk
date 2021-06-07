@@ -723,11 +723,11 @@ static void initialize_monitor_enter_methods(TRAPS) {
 
   vmSymbols::_monitor_enter_method = ik->lookup_method(
      vmSymbols::enter_method_name(),
-     vmSymbols::object_int_signature()); // object_void_signature
+     vmSymbols::object_void_signature()); // object_void_signature
 
   vmSymbols::_monitor_exit_method = ik->lookup_method(
      vmSymbols::exit_method_name(),
-     vmSymbols::void_int_signature()); // object_void_signature
+     vmSymbols::void_method_signature()); // object_void_signature
 
   assert(vmSymbols::_monitor_enter_method != NULL &&
          vmSymbols::_monitor_exit_method != NULL, "Bad");

@@ -248,7 +248,7 @@ address TemplateInterpreterGenerator::generate_return_entry_for_monitor_enter() 
     __ empty_FPU_stack();
   }
 #endif
-
+    
   // Restore stack bottom in case i2c adjusted stack
   __ movptr(rsp, Address(rbp, frame::interpreter_frame_last_sp_offset * wordSize));
   // and NULL it as marker that esp is now tos until next java call
@@ -257,19 +257,15 @@ address TemplateInterpreterGenerator::generate_return_entry_for_monitor_enter() 
   __ restore_bcp();
   __ restore_locals();
 
-  const Register cache = rbx;
-  const Register index = rcx;
-  __ get_cache_and_index_at_bcp(cache, index, 1, sizeof(u2));
+  __ lea(rsp, Address(rsp, 0 * Interpreter::stackElementScale()));
+  
+  __ os_breakpoint();
 
-  /*const Register flags = cache;
-  __ movl(flags, Address(cache, index, Address::times_ptr, ConstantPoolCache::base_offset() + ConstantPoolCacheEntry::flags_offset()));
-  __ andl(flags, ConstantPoolCacheEntry::parameter_size_mask);
-  __ lea(rsp, Address(rsp, flags, Interpreter::stackElementScale()));*/
-
-  const Register java_thread = NOT_LP64(rcx) LP64_ONLY(r15_thread);
+  __ nop(6);
   
   int step = Bytecodes::length_for(Bytecodes::_monitorenter);
-  __ dispatch_next(itos, step);
+  log_error(os)("Step is:%d", step);
+  __ dispatch_next(vtos, step, false);
 
   return entry;
 }
@@ -282,6 +278,7 @@ address TemplateInterpreterGenerator::generate_return_entry_for_monitor_exit() {
     __ empty_FPU_stack();
   }
 #endif
+  
 
   // Restore stack bottom in case i2c adjusted stack
   __ movptr(rsp, Address(rbp, frame::interpreter_frame_last_sp_offset * wordSize));
@@ -290,20 +287,16 @@ address TemplateInterpreterGenerator::generate_return_entry_for_monitor_exit() {
 
   __ restore_bcp();
   __ restore_locals();
+  
+  __ lea(rsp, Address(rsp, 0 * Interpreter::stackElementScale()));
+  
+  __ os_breakpoint();
 
-  const Register cache = rbx;
-  const Register index = rcx;
-  __ get_cache_and_index_at_bcp(cache, index, 1, sizeof(u2));
-
-  /*const Register flags = cache;
-  __ movl(flags, Address(cache, index, Address::times_ptr, ConstantPoolCache::base_offset() + ConstantPoolCacheEntry::flags_offset()));
-  __ andl(flags, ConstantPoolCacheEntry::parameter_size_mask);
-  __ lea(rsp, Address(rsp, flags, Interpreter::stackElementScale()));*/
-
-  const Register java_thread = NOT_LP64(rcx) LP64_ONLY(r15_thread);
+  __ nop(6);
   
   int step = Bytecodes::length_for(Bytecodes::_monitorexit);
-  __ dispatch_next(itos, step);
+  log_error(os)("Step is:%d", step);
+  __ dispatch_next(vtos, step, false);
 
   return entry;
 }

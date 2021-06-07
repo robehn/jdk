@@ -839,13 +839,16 @@ void InterpreterMacroAssembler::dispatch_base(TosState state,
   verify_FPU(1, state);
   if (VerifyActivationFrameSize) {
     Label L;
+    nop(2);
     mov(rcx, rbp);
     subptr(rcx, rsp);
     int32_t min_frame_size =
       (frame::link_offset - frame::interpreter_frame_initial_sp_offset) *
       wordSize;
     cmpptr(rcx, (int32_t)min_frame_size);
+    nop(2);
     jcc(Assembler::greaterEqual, L);
+    nop(2);
     stop("broken stack frame");
     bind(L);
   }

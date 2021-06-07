@@ -125,10 +125,7 @@ void TemplateInterpreterGenerator::generate_all() {
   
   {
     CodeletMark cm(_masm, "monitor return entry points");
-    int length = Bytecodes::length_for(Bytecodes::_monitorenter);
     Interpreter::_monitor_return_entry[0] = generate_return_entry_for_monitor_enter();
-    
-    length = Bytecodes::length_for(Bytecodes::_monitorexit);
     Interpreter::_monitor_return_entry[1] = generate_return_entry_for_monitor_exit();
   }
 

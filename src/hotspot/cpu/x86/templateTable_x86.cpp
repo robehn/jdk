@@ -3579,7 +3579,7 @@ void TemplateTable::prepare_invoke(int byte_no,
     // T_INT, itos 4
     // __ movl(flags, 400000000);
     
-    __ os_breakpoint();
+    //__ os_breakpoint();
   } else if (code == Bytecodes::_monitorexit) {
     assert(load_receiver == false, "bad");
     assert(save_flags == false, "bad");
@@ -3588,7 +3588,7 @@ void TemplateTable::prepare_invoke(int byte_no,
     // T_INT, itos 4
     // __ movl(flags, 400000000);
 
-    __ os_breakpoint();
+    //__ os_breakpoint();
   } else {
     load_invoke_cp_cache_entry(byte_no, method, index, flags, is_invokevirtual, false, is_invokedynamic);
   }
