@@ -122,6 +122,15 @@ void TemplateInterpreterGenerator::generate_all() {
       Interpreter::_invokedynamic_return_entry[i]   = Interpreter::_invokedynamic_return_entry[itos];
     }
   }
+  
+  {
+    CodeletMark cm(_masm, "monitor return entry points");
+    int length = Bytecodes::length_for(Bytecodes::_monitorenter);
+    Interpreter::_monitor_return_entry[0] = generate_return_entry_for_monitor_enter();
+    
+    length = Bytecodes::length_for(Bytecodes::_monitorexit);
+    Interpreter::_monitor_return_entry[1] = generate_return_entry_for_monitor_exit();
+  }
 
   { CodeletMark cm(_masm, "earlyret entry points");
     Interpreter::_earlyret_entry =

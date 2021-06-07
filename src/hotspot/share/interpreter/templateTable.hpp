@@ -307,6 +307,7 @@ class TemplateTable: AllStatic {
   static void monitorenter();
   static void monitorenter2();
   static void monitorexit();
+  static void monitorexit2();
 
   static void wide();
   static void multianewarray();

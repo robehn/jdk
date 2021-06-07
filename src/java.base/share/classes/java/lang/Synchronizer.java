@@ -37,14 +37,24 @@ package java.lang;
  * @since   1.0
  */
 public final class Synchronizer {
-    private Synchronizer() {
+    Synchronizer() {
     }
-    static int enter() {
-        System.out.println("Enter");
-        return 0;
+    /**
+     * Dummy
+     * @param o lock o
+     * @return stuff
+     */
+    public static int enter(Object o) {
+        if (o != null)
+            return 0;
+        return 1;
     }
-    static int exit() {
-        System.out.println("Exit");
+    /**
+     * Dummy
+     * @return stuff
+     */
+    public static int exit() {
+        System.out.println("Hej");
         return 0;
     }
 }

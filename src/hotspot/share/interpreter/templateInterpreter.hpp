@@ -124,6 +124,7 @@ class TemplateInterpreter: public AbstractInterpreter {
   static EntryPoint _safept_entry;
 
   static address _invoke_return_entry[number_of_return_addrs];           // for invokestatic, invokespecial, invokevirtual return entries
+  static address _monitor_return_entry[2];
   static address _invokeinterface_return_entry[number_of_return_addrs];  // for invokeinterface return entries
   static address _invokedynamic_return_entry[number_of_return_addrs];    // for invokedynamic return entries
 
@@ -167,6 +168,8 @@ class TemplateInterpreter: public AbstractInterpreter {
 
   // Support for invokes
   static address*   invoke_return_entry_table()                 { return _invoke_return_entry; }
+  static address    monitor_enter_return_entry_adr()            { return _monitor_return_entry[0]; }
+  static address    monitor_exit_return_entry_adr()             { return _monitor_return_entry[1]; }
   static address*   invokeinterface_return_entry_table()        { return _invokeinterface_return_entry; }
   static address*   invokedynamic_return_entry_table()          { return _invokedynamic_return_entry; }
   static int        TosState_as_index(TosState state);

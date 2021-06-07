@@ -3548,6 +3548,7 @@ void TemplateTable::prepare_invoke(int byte_no,
   Bytecodes::Code code = bytecode();
   
   assert((byte_no == -1) == (code == Bytecodes::_monitorenter), "bad");
+  assert((byte_no == -2) == (code == Bytecodes::_monitorexit), "bad");
 
   const bool is_invokeinterface  = code == Bytecodes::_invokeinterface;
   const bool is_invokedynamic    = code == Bytecodes::_invokedynamic;
@@ -3556,7 +3557,8 @@ void TemplateTable::prepare_invoke(int byte_no,
   const bool is_invokespecial    = code == Bytecodes::_invokespecial;
   const bool load_receiver       = (recv  != noreg);
   const bool save_flags          = (flags != noreg);
-  assert(load_receiver == (code != Bytecodes::_monitorenter && code != Bytecodes::_invokestatic && code != Bytecodes::_invokedynamic), "");
+  assert(load_receiver == (code != Bytecodes::_monitorenter && code != Bytecodes::_monitorexit 
+                           && code != Bytecodes::_invokestatic && code != Bytecodes::_invokedynamic), "");
   assert(save_flags    == (is_invokeinterface || is_invokevirtual), "need flags for vfinal");
   assert(flags == noreg || flags == rdx, "");
   assert(recv  == noreg || recv  == rcx, "");
@@ -3572,18 +3574,23 @@ void TemplateTable::prepare_invoke(int byte_no,
   if (code == Bytecodes::_monitorenter) {
     assert(load_receiver == false, "bad");
     assert(save_flags == false, "bad");
-  //  __ warn("ME");
     ExternalAddress fetch_addr((address) &vmSymbols::_monitor_enter_method);
     __ movptr(method, fetch_addr);
     // T_INT, itos 4
-    __ movl(flags, 400000000);
-    code = Bytecodes::_invokestatic;
+    // __ movl(flags, 400000000);
+    
+    __ os_breakpoint();
+  } else if (code == Bytecodes::_monitorexit) {
+    assert(load_receiver == false, "bad");
+    assert(save_flags == false, "bad");
+    ExternalAddress fetch_addr((address) &vmSymbols::_monitor_exit_method);
+    __ movptr(method, fetch_addr);
+    // T_INT, itos 4
+    // __ movl(flags, 400000000);
+
+    __ os_breakpoint();
   } else {
     load_invoke_cp_cache_entry(byte_no, method, index, flags, is_invokevirtual, false, is_invokedynamic);
-  }
-  
-  if (byte_no == -1) {
-  //  __ warn("ME1");
   }
 
   // maybe push appendix to arguments (just before return address)
@@ -3617,24 +3624,31 @@ void TemplateTable::prepare_invoke(int byte_no,
   if (save_flags) {
     __ movl(rbcp, flags);
   }
-
-  // compute return type
- // __ print_state();
-
-  __ shrl(flags, ConstantPoolCacheEntry::tos_state_shift);
   
-//  __ print_state();
-  // Make sure we don't need to mask flags after the above shift
-  ConstantPoolCacheEntry::verify_tos_state_shift();
-  // load return address
-  {
-    const address table_addr = (address) Interpreter::invoke_return_entry_table_for(code);
-    ExternalAddress table(table_addr);
-    LP64_ONLY(__ lea(rscratch1, table));
-    LP64_ONLY(__ movptr(flags, Address(rscratch1, flags, Address::times_ptr)));
-    NOT_LP64(__ movptr(flags, ArrayAddress(table, Address(noreg, flags, Address::times_ptr))));
+  if (code == Bytecodes::_monitorenter) {
+    const address addr = (address) Interpreter::monitor_enter_return_entry_adr();
+    ExternalAddress entry(addr);
+    __ lea(flags, entry);
+  } else if (code == Bytecodes::_monitorexit) {
+    const address addr = (address) Interpreter::monitor_exit_return_entry_adr();
+    ExternalAddress entry(addr);
+    __ lea(flags, entry);
+  } else { 
+    // compute return type
+    __ shrl(flags, ConstantPoolCacheEntry::tos_state_shift);
+  
+    // Make sure we don't need to mask flags after the above shift
+    ConstantPoolCacheEntry::verify_tos_state_shift();
+    // load return address
+    {
+      const address table_addr = (address) Interpreter::invoke_return_entry_table_for(code);
+      ExternalAddress table(table_addr);
+      LP64_ONLY(__ lea(rscratch1, table));
+      LP64_ONLY(__ movptr(flags, Address(rscratch1, flags, Address::times_ptr)));
+      NOT_LP64(__ movptr(flags, ArrayAddress(table, Address(noreg, flags, Address::times_ptr))));
+    }
   }
-  
+
   // push return address
   __ push(flags);
 
@@ -3643,10 +3657,6 @@ void TemplateTable::prepare_invoke(int byte_no,
   if (save_flags) {
     __ movl(flags, rbcp);
     __ restore_bcp();
-  }
-  
-  if (byte_no == -1) {
-   //  __ warn("ME prep end");
   }
 }
 
@@ -4326,6 +4336,26 @@ void TemplateTable::monitorenter() {
   __ jump_from_interpreted(rbx, rax);
 }
 
+void TemplateTable::monitorexit() {
+  transition(atos, vtos);
+  
+  // check for NULL object
+  __ null_check(rax);
+
+  Register rmon = LP64_ONLY(c_rarg1) NOT_LP64(rdx);
+  
+  //assert(byte_no == f1_byte, "use this argument");
+  assert(Bytecodes::_monitorexit == bytecode(), "Bad BC");
+  
+  prepare_invoke(-2, rbx);  // get f1 Method*
+  
+  // do the call
+  // __ profile_call(rax);
+  // __ profile_arguments_type(rax, rbx, rbcp, false);
+  
+  __ jump_from_interpreted(rbx, rax);
+}
+
 void TemplateTable::monitorenter2() {
   transition(atos, vtos);
 
@@ -4352,7 +4382,7 @@ void TemplateTable::monitorenter2() {
   __ dispatch_next(vtos);
 }
 
-void TemplateTable::monitorexit() {
+void TemplateTable::monitorexit2() {
   transition(atos, vtos);
 
   // check for NULL object

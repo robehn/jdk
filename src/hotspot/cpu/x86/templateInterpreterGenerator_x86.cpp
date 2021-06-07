@@ -240,6 +240,74 @@ address TemplateInterpreterGenerator::generate_return_entry_for(TosState state, 
   return entry;
 }
 
+address TemplateInterpreterGenerator::generate_return_entry_for_monitor_enter() {
+  address entry = __ pc();
+
+#ifdef COMPILER2
+  if (UseSSE < 2) {
+    __ empty_FPU_stack();
+  }
+#endif
+
+  // Restore stack bottom in case i2c adjusted stack
+  __ movptr(rsp, Address(rbp, frame::interpreter_frame_last_sp_offset * wordSize));
+  // and NULL it as marker that esp is now tos until next java call
+  __ movptr(Address(rbp, frame::interpreter_frame_last_sp_offset * wordSize), (int32_t)NULL_WORD);
+
+  __ restore_bcp();
+  __ restore_locals();
+
+  const Register cache = rbx;
+  const Register index = rcx;
+  __ get_cache_and_index_at_bcp(cache, index, 1, sizeof(u2));
+
+  /*const Register flags = cache;
+  __ movl(flags, Address(cache, index, Address::times_ptr, ConstantPoolCache::base_offset() + ConstantPoolCacheEntry::flags_offset()));
+  __ andl(flags, ConstantPoolCacheEntry::parameter_size_mask);
+  __ lea(rsp, Address(rsp, flags, Interpreter::stackElementScale()));*/
+
+  const Register java_thread = NOT_LP64(rcx) LP64_ONLY(r15_thread);
+  
+  int step = Bytecodes::length_for(Bytecodes::_monitorenter);
+  __ dispatch_next(itos, step);
+
+  return entry;
+}
+
+address TemplateInterpreterGenerator::generate_return_entry_for_monitor_exit() {
+  address entry = __ pc();
+
+#ifdef COMPILER2
+  if (UseSSE < 2) {
+    __ empty_FPU_stack();
+  }
+#endif
+
+  // Restore stack bottom in case i2c adjusted stack
+  __ movptr(rsp, Address(rbp, frame::interpreter_frame_last_sp_offset * wordSize));
+  // and NULL it as marker that esp is now tos until next java call
+  __ movptr(Address(rbp, frame::interpreter_frame_last_sp_offset * wordSize), (int32_t)NULL_WORD);
+
+  __ restore_bcp();
+  __ restore_locals();
+
+  const Register cache = rbx;
+  const Register index = rcx;
+  __ get_cache_and_index_at_bcp(cache, index, 1, sizeof(u2));
+
+  /*const Register flags = cache;
+  __ movl(flags, Address(cache, index, Address::times_ptr, ConstantPoolCache::base_offset() + ConstantPoolCacheEntry::flags_offset()));
+  __ andl(flags, ConstantPoolCacheEntry::parameter_size_mask);
+  __ lea(rsp, Address(rsp, flags, Interpreter::stackElementScale()));*/
+
+  const Register java_thread = NOT_LP64(rcx) LP64_ONLY(r15_thread);
+  
+  int step = Bytecodes::length_for(Bytecodes::_monitorexit);
+  __ dispatch_next(itos, step);
+
+  return entry;
+}
+
 
 address TemplateInterpreterGenerator::generate_deopt_entry_for(TosState state, int step, address continuation) {
   address entry = __ pc();
