@@ -48,6 +48,13 @@ public final class Synchronizer {
     }
     /**
      * Dummy
+     * @param o lock o
+     * @return stuff
+     */
+    public static void wait(Object o) {
+    }
+    /**
+     * Dummy
      * @return stuff
      */
     public static void exit() {
