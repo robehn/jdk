@@ -3576,19 +3576,11 @@ void TemplateTable::prepare_invoke(int byte_no,
     assert(save_flags == false, "bad");
     ExternalAddress fetch_addr((address) &vmSymbols::_monitor_enter_method);
     __ movptr(method, fetch_addr);
-    // T_INT, itos 4
-    // __ movl(flags, 400000000);
-    
-    //__ os_breakpoint();
   } else if (code == Bytecodes::_monitorexit) {
     assert(load_receiver == false, "bad");
     assert(save_flags == false, "bad");
     ExternalAddress fetch_addr((address) &vmSymbols::_monitor_exit_method);
     __ movptr(method, fetch_addr);
-    // T_INT, itos 4
-    // __ movl(flags, 400000000);
-
-    //__ os_breakpoint();
   } else {
     load_invoke_cp_cache_entry(byte_no, method, index, flags, is_invokevirtual, false, is_invokedynamic);
   }
@@ -3636,7 +3628,7 @@ void TemplateTable::prepare_invoke(int byte_no,
   } else { 
     // compute return type
     __ shrl(flags, ConstantPoolCacheEntry::tos_state_shift);
-  
+    
     // Make sure we don't need to mask flags after the above shift
     ConstantPoolCacheEntry::verify_tos_state_shift();
     // load return address
@@ -4317,43 +4309,33 @@ void TemplateTable::athrow() {
 // ...
 // [saved rbp    ] <--- rbp
 void TemplateTable::monitorenter() {
-  transition(atos, vtos);
-  
-  // check for NULL object
-  __ null_check(rax);
-
-  Register rmon = LP64_ONLY(c_rarg1) NOT_LP64(rdx);
-  
-  //assert(byte_no == f1_byte, "use this argument");
   assert(Bytecodes::_monitorenter == bytecode(), "Bad BC");
+  // check for NULL object
+//  __ null_check(rax);
+  
+//  __ push(atos);
+
+  __ os_breakpoint();
+
+  transition(vtos, vtos);
   
   prepare_invoke(-1, rbx);  // get f1 Method*
   
-  // do the call
-  // __ profile_call(rax);
-  // __ profile_arguments_type(rax, rbx, rbcp, false);
-  
-  __ jump_from_interpreted(rbx, rax);
+  __ jump_from_interpreted(rbx, rdx);
 }
 
 void TemplateTable::monitorexit() {
-  transition(atos, vtos);
-  
-  // check for NULL object
-  __ null_check(rax);
-
-  Register rmon = LP64_ONLY(c_rarg1) NOT_LP64(rdx);
-  
-  //assert(byte_no == f1_byte, "use this argument");
   assert(Bytecodes::_monitorexit == bytecode(), "Bad BC");
+  // check for NULL object
+//  __ null_check(rax);
+  
+//  __ push(atos);
+  
+  transition(vtos, vtos);
   
   prepare_invoke(-2, rbx);  // get f1 Method*
   
-  // do the call
-  // __ profile_call(rax);
-  // __ profile_arguments_type(rax, rbx, rbcp, false);
-  
-  __ jump_from_interpreted(rbx, rax);
+  __ jump_from_interpreted(rbx, rdx);
 }
 
 void TemplateTable::monitorenter2() {

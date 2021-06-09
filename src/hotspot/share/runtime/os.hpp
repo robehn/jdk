@@ -510,6 +510,7 @@ class os: AllStatic {
   static frame      fetch_compiled_frame_from_context(const void* ucVoid);
 
   static void breakpoint();
+  static void breakpoint2();
   static bool start_debugging(char *buf, int buflen);
 
   static address current_stack_pointer();

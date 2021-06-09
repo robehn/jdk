@@ -818,7 +818,6 @@ void InterpreterMacroAssembler::jump_from_interpreted(Register method, Register 
     jmp(Address(method, Method::interpreter_entry_offset()));
     bind(run_compiled_code);
   }
-
   jmp(Address(method, Method::from_interpreted_offset()));
 }
 
@@ -1094,6 +1093,12 @@ void InterpreterMacroAssembler::lock_object(Register lock_reg) {
          "The argument is only for looks. It must be c_rarg1");
 
     call_VM(noreg, CAST_FROM_FN_PTR(address, InterpreterRuntime::monitorenter), lock_reg);
+}
+
+void InterpreterMacroAssembler::poop(Register lock_reg) {
+  assert(lock_reg == LP64_ONLY(c_rarg1) NOT_LP64(rdx),
+         "The argument is only for looks. It must be c_rarg1");
+  call_VM(noreg, CAST_FROM_FN_PTR(address, InterpreterRuntime::poop), lock_reg);
 }
 
 

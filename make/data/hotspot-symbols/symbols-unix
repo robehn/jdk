@@ -21,6 +21,12 @@
 # questions.
 #
 
+JVM_BJL_lock
+JVM_BJL_unlock
+JVM_BJL_wait
+JVM_BJL_notify
+JVM_BJL_notify_all
+
 JVM_ActiveProcessorCount
 JVM_AreNestMates
 JVM_ArrayCopy

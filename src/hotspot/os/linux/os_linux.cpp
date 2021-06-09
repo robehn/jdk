@@ -504,7 +504,11 @@ void os::init_system_properties_values() {
 // breakpoint support
 
 void os::breakpoint() {
-  BREAKPOINT;
+//  BREAKPOINT;
+}
+
+void os::breakpoint2() {
+//  BREAKPOINT;
 }
 
 extern "C" void breakpoint() {

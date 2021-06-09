@@ -140,8 +140,8 @@ void JfrJavaSupport::notify_all(jobject object, TRAPS) {
   Handle h_obj(THREAD, resolve_non_null(object));
   assert(h_obj.not_null(), "invariant");
   ObjectSynchronizer::BJL_lock(h_obj);
-  ObjectSynchronizer::BJL_notify_all();
-  ObjectSynchronizer::BJL_unlock();
+  ObjectSynchronizer::BJL_notify_all(h_obj);
+  ObjectSynchronizer::BJL_unlock(h_obj);
   DEBUG_ONLY(check_java_thread_in_vm(THREAD));
 }
 

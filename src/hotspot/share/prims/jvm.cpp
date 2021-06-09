@@ -593,40 +593,44 @@ JVM_ENTRY(jint, JVM_MoreStackWalk(JNIEnv *env, jobject stackStream, jlong mode, 
                                    start_index, frames_array_h, THREAD);
 JVM_END
 
+// java.lang.Synchronizer ///////////////////////////////////////////////
+JVM_ENTRY(void, JVM_BJL_lock(JNIEnv* env, jclass jc, jobject handle))
+//  Handle obj(THREAD, JNIHandles::resolve_non_null(handle));
+  Handle obj(THREAD, NULL);
+  ObjectSynchronizer::BJL_lock(obj);
+JVM_END
+
+JVM_ENTRY(void, JVM_BJL_unlock(JNIEnv* env, jclass jc, jobject handle))
+//  Handle obj(THREAD, JNIHandles::resolve(handle));
+  Handle obj(THREAD, NULL);
+  ObjectSynchronizer::BJL_unlock(obj);
+JVM_END
+
+JVM_ENTRY(void, JVM_BJL_wait(JNIEnv* env, jclass jc, jobject handle))
+//  Handle obj(THREAD, JNIHandles::resolve_non_null(handle));
+  Handle obj(THREAD, NULL);
+  ObjectSynchronizer::BJL_wait(obj);
+JVM_END
+
+JVM_ENTRY(void, JVM_BJL_notify(JNIEnv* env, jclass jc, jobject handle))
+//  Handle obj(THREAD, JNIHandles::resolve_non_null(handle));
+  Handle obj(THREAD, NULL);
+  ObjectSynchronizer::BJL_notify(obj);
+JVM_END
+
+JVM_ENTRY(void, JVM_BJL_notify_all(JNIEnv* env, jclass jc, jobject handle))
+//  Handle obj(THREAD, JNIHandles::resolve_non_null(handle));
+  Handle obj(THREAD, NULL);
+  ObjectSynchronizer::BJL_notify_all(obj);
+JVM_END
+
+
 // java.lang.Object ///////////////////////////////////////////////
 
 
 JVM_ENTRY(jint, JVM_IHashCode(JNIEnv* env, jobject handle))
   // as implemented in the classic virtual machine; return 0 if object is NULL
   return handle == NULL ? 0 : ObjectSynchronizer::FastHashCode (THREAD, JNIHandles::resolve_non_null(handle)) ;
-JVM_END
-
-
-JVM_ENTRY(void, JVM_MonitorWait(JNIEnv* env, jobject handle, jlong ms))
-  Handle obj(THREAD, JNIHandles::resolve_non_null(handle));
-  JavaThreadInObjectWaitState jtiows(thread, ms != 0);
-  if (JvmtiExport::should_post_monitor_wait()) {
-    JvmtiExport::post_monitor_wait(thread, obj(), ms);
-
-    // The current thread already owns the monitor and it has not yet
-    // been added to the wait queue so the current thread cannot be
-    // made the successor. This means that the JVMTI_EVENT_MONITOR_WAIT
-    // event handler cannot accidentally consume an unpark() meant for
-    // the ParkEvent associated with this ObjectMonitor.
-  }
-  ObjectSynchronizer::BJL_wait();
-JVM_END
-
-
-JVM_ENTRY(void, JVM_MonitorNotify(JNIEnv* env, jobject handle))
-  Handle obj(THREAD, JNIHandles::resolve_non_null(handle));
-  ObjectSynchronizer::BJL_notify();
-JVM_END
-
-
-JVM_ENTRY(void, JVM_MonitorNotifyAll(JNIEnv* env, jobject handle))
-  Handle obj(THREAD, JNIHandles::resolve_non_null(handle));
-  ObjectSynchronizer::BJL_notify_all();
 JVM_END
 
 

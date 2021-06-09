@@ -37,26 +37,68 @@ package java.lang;
  * @since   1.0
  */
 public final class Synchronizer {
-    Synchronizer() {
+    private native static void nlock(Object o);
+    private native static void nunlock(Object o);
+    private native static void nwait(Object o);
+    private native static void nnotify(Object o);
+    private native static void nnotify_all(Object o);
+
+    private Synchronizer() {
     }
+
+    private static native void registerNatives();
+    static {
+        registerNatives();
+    }
+
+
     /**
      * Dummy
      * @param o lock o
      * @return stuff
      */
     public static void enter(Object o) {
+        nlock(o);
     }
     /**
      * Dummy
      * @param o lock o
      * @return stuff
      */
-    public static void wait(Object o) {
+    public static void waitDo(Object o) {
+        nwait(o);
     }
     /**
      * Dummy
+     * @param o lock o
+     * @return stuff
+     */
+    public static void exit(Object o) {
+        nunlock(o);
+    }
+    /**
+     * Dummy
+     * @param o lock o
      * @return stuff
      */
     public static void exit() {
+        nunlock(null);
+    }
+
+    /**
+     * Dummy
+     * @param o lock o
+     * @return stuff
+     */
+    public static void notifyDo(Object o) {
+        nnotify(o);
+    }
+    /**
+     * Dummy
+     * @param o lock o
+     * @return stuff
+     */
+    public static void notifyAllDo(Object o) {
+        nnotify_all(o);
     }
 }

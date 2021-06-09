@@ -39,6 +39,7 @@
 #include "interpreter/linkResolver.hpp"
 #include "interpreter/templateTable.hpp"
 #include "logging/log.hpp"
+#include "logging/logStream.hpp"
 #include "memory/oopFactory.hpp"
 #include "memory/resourceArea.hpp"
 #include "memory/universe.hpp"
@@ -702,6 +703,15 @@ void InterpreterRuntime::resolve_get_put(JavaThread* current, Bytecodes::Code by
 //%note monitor_1
 //
 // BIG JAVA LOCK
+
+JRT_ENTRY(void, InterpreterRuntime::poop(JavaThread* current, oopDesc* obj))
+    HandleMark hm(current);
+    Handle h_obj = Handle(current, obj);
+    ResourceMark rm;
+    LogTarget(Error, os) lt;             
+    LogStream ls(lt);
+    h_obj()->print_on(&ls);
+JRT_END
 
 JRT_ENTRY_NO_ASYNC(void, InterpreterRuntime::monitorenter(JavaThread* current, oopDesc* obj))
     Handle h_obj = Handle(current, obj);

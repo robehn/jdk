@@ -60,11 +60,13 @@
 
 
 pthread_mutex_t ObjectSynchronizer::BJL = PTHREAD_RECURSIVE_MUTEX_INITIALIZER_NP;
-pthread_cond_t ObjectSynchronizer::BJL_COND;
+pthread_cond_t ObjectSynchronizer::BJL_COND = PTHREAD_COND_INITIALIZER;
 volatile Thread* ObjectSynchronizer::_owner = NULL;
 volatile int ObjectSynchronizer::_rec = 0;
 
-void ObjectSynchronizer::BJL_wait() {
+void ObjectSynchronizer::BJL_wait(Handle obj) {
+  assert(_owner == Thread::current(), "Bad:%p != %p", _owner, Thread::current());
+  assert(_rec == 0, "Bad:%p != %p", _owner, Thread::current());
   ThreadBlockInVM tbivm(JavaThread::current());
   log_debug(os)("%p: %s:%d", Thread::current(), __func__, __LINE__);
   int save = _rec;
@@ -77,15 +79,17 @@ void ObjectSynchronizer::BJL_wait() {
   assert(ret == 0, "bad");
 }
  
-void ObjectSynchronizer::BJL_notify() {
+void ObjectSynchronizer::BJL_notify(Handle obj) {
   log_debug(os)("%p: %s:%d", Thread::current(), __func__, __LINE__);
+  assert(_owner == Thread::current(), "Bad:%p != %p", _owner, Thread::current());
   int ret = pthread_cond_signal(&BJL_COND);
   log_debug(os)("%p: %s:%d NOTIFIED: %d", Thread::current(), __func__, __LINE__, _rec);
   assert(ret == 0, "bad");
 }
 
-void ObjectSynchronizer::BJL_notify_all() {
+void ObjectSynchronizer::BJL_notify_all(Handle obj) {
   log_debug(os)("%p: %s:%d", Thread::current(), __func__, __LINE__);
+  assert(_owner == Thread::current(), "Bad:%p != %p", _owner, Thread::current());
   int ret = pthread_cond_broadcast(&BJL_COND);
   log_debug(os)("%p: %s:%d NOTIFIED ALL: %d", Thread::current(), __func__, __LINE__, _rec);
   assert(ret == 0, "bad");
@@ -114,7 +118,7 @@ void ObjectSynchronizer::BJL_lock(Handle obj) {
   log_debug(os)("%p: %s:%d LOCKED: %d", Thread::current(), __func__, __LINE__, _rec);
 }
 
-void ObjectSynchronizer::BJL_unlock() {
+void ObjectSynchronizer::BJL_unlock(Handle obj) {
   log_debug(os)("%p: %s:%d", Thread::current(), __func__, __LINE__);
   assert(_owner == Thread::current(), "Bad:%p != %p", _owner, Thread::current());
   if (_rec > 0) {

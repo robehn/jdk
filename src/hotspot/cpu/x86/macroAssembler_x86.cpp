@@ -2914,6 +2914,12 @@ void MacroAssembler::os_breakpoint() {
   call(RuntimeAddress(CAST_FROM_FN_PTR(address, os::breakpoint)));
 }
 
+void MacroAssembler::os_breakpoint2() {
+  // instead of directly emitting a breakpoint, call os:breakpoint for better debugability
+  // (e.g., MSVC can't call ps() otherwise)
+  call(RuntimeAddress(CAST_FROM_FN_PTR(address, os::breakpoint2)));
+}
+
 void MacroAssembler::unimplemented(const char* what) {
   const char* buf = NULL;
   {

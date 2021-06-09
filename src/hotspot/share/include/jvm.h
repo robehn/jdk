@@ -60,20 +60,12 @@ extern "C" {
 /*************************************************************************
  PART 1: Functions for Native Libraries
  ************************************************************************/
+
 /*
  * java.lang.Object
  */
 JNIEXPORT jint JNICALL
 JVM_IHashCode(JNIEnv *env, jobject obj);
-
-JNIEXPORT void JNICALL
-JVM_MonitorWait(JNIEnv *env, jobject obj, jlong ms);
-
-JNIEXPORT void JNICALL
-JVM_MonitorNotify(JNIEnv *env, jobject obj);
-
-JNIEXPORT void JNICALL
-JVM_MonitorNotifyAll(JNIEnv *env, jobject obj);
 
 JNIEXPORT jobject JNICALL
 JVM_Clone(JNIEnv *env, jobject obj);
@@ -292,6 +284,21 @@ JVM_GetAllThreads(JNIEnv *env, jclass dummy);
 
 JNIEXPORT void JNICALL
 JVM_SetNativeThreadName(JNIEnv *env, jobject jthread, jstring name);
+
+JNIEXPORT void JNICALL 
+JVM_BJL_lock(JNIEnv* env, jclass jc, jobject handle);
+
+JNIEXPORT void JNICALL 
+JVM_BJL_unlock(JNIEnv* env, jclass jc, jobject handle);
+
+JNIEXPORT void JNICALL 
+JVM_BJL_wait(JNIEnv* env, jclass jc, jobject handle);
+
+JNIEXPORT void JNICALL 
+JVM_BJL_notify(JNIEnv* env, jclass jc, jobject handle);
+
+JNIEXPORT void JNICALL 
+JVM_BJL_notify_all(JNIEnv* env, jclass jc, jobject handle);
 
 /* getStackTrace() and getAllStackTraces() method */
 JNIEXPORT jobjectArray JNICALL

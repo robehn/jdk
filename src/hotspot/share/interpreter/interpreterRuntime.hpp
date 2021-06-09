@@ -105,6 +105,7 @@ class InterpreterRuntime: AllStatic {
 
  public:
   // Synchronization
+  static void    poop(JavaThread* current, oopDesc* obj);
   static void    monitorenter(JavaThread* current, oopDesc* obj);
   static void    monitorexit();
 

@@ -646,6 +646,7 @@ class MacroAssembler: public Assembler {
   static void print_state64(int64_t pc, int64_t regs[]);
 
   void os_breakpoint();
+  void os_breakpoint2();
 
   void untested()                                { stop("untested"); }
 

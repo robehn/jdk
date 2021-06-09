@@ -1739,6 +1739,7 @@ public class Thread implements Runnable {
     }
 
     private static native StackTraceElement[][] dumpThreads(Thread[] threads);
+    private static native void dumpThreads2(Object thread);
     private static native Thread[] getThreads();
 
     /**

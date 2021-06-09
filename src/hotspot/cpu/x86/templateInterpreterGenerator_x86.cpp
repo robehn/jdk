@@ -240,6 +240,8 @@ address TemplateInterpreterGenerator::generate_return_entry_for(TosState state, 
   return entry;
 }
 
+#define PA_SIZE 0
+
 address TemplateInterpreterGenerator::generate_return_entry_for_monitor_enter() {
   address entry = __ pc();
 
@@ -257,14 +259,12 @@ address TemplateInterpreterGenerator::generate_return_entry_for_monitor_enter() 
   __ restore_bcp();
   __ restore_locals();
 
-  __ lea(rsp, Address(rsp, 0 * Interpreter::stackElementScale()));
-  
-  __ os_breakpoint();
+  __ os_breakpoint2();
 
-  __ nop(6);
+  // __ lea(rsp, Address(rsp, 0, Interpreter::stackElementScale()));
+  // __ lea(rsp, Address(rsp, PA_SIZE * Interpreter::stackElementScale()));
   
   int step = Bytecodes::length_for(Bytecodes::_monitorenter);
-  log_error(os)("Step is:%d", step);
   __ dispatch_next(vtos, step, false);
 
   return entry;
@@ -278,7 +278,6 @@ address TemplateInterpreterGenerator::generate_return_entry_for_monitor_exit() {
     __ empty_FPU_stack();
   }
 #endif
-  
 
   // Restore stack bottom in case i2c adjusted stack
   __ movptr(rsp, Address(rbp, frame::interpreter_frame_last_sp_offset * wordSize));
@@ -288,14 +287,9 @@ address TemplateInterpreterGenerator::generate_return_entry_for_monitor_exit() {
   __ restore_bcp();
   __ restore_locals();
   
-  __ lea(rsp, Address(rsp, 0 * Interpreter::stackElementScale()));
-  
-  __ os_breakpoint();
-
-  __ nop(6);
+  // __ lea(rsp, Address(rsp, 0 * Interpreter::stackElementScale()));
   
   int step = Bytecodes::length_for(Bytecodes::_monitorexit);
-  log_error(os)("Step is:%d", step);
   __ dispatch_next(vtos, step, false);
 
   return entry;
@@ -869,6 +863,9 @@ address TemplateInterpreterGenerator::generate_native_entry(bool synchronized) {
   // so method is not locked if overflows.
   if (synchronized) {
     lock_method();
+    //aload
+    //push atos
+    //monitorenter
   } else {
     // no synchronization necessary
 #ifdef ASSERT
@@ -909,7 +906,7 @@ address TemplateInterpreterGenerator::generate_native_entry(bool synchronized) {
   __ get_method(method);
   __ movptr(t, Address(method, Method::const_offset()));
   __ load_unsigned_short(t, Address(t, ConstMethod::size_of_parameters_offset()));
-
+  
 #ifndef _LP64
   __ shlptr(t, Interpreter::logStackElementSize); // Convert parameter count to bytes.
   __ addptr(t, 2*wordSize);     // allocate two more slots for JNIEnv and possible mirror
@@ -1300,7 +1297,6 @@ address TemplateInterpreterGenerator::generate_normal_entry(bool synchronized) {
                                    ConstMethod::size_of_parameters_offset());
   const Address size_of_locals(rdx, ConstMethod::size_of_locals_offset());
 
-
   // get parameter size (always needed)
   __ movptr(rdx, constMethod);
   __ load_unsigned_short(rcx, size_of_parameters);
@@ -1311,10 +1307,6 @@ address TemplateInterpreterGenerator::generate_normal_entry(bool synchronized) {
 
   __ load_unsigned_short(rdx, size_of_locals); // get size of locals in words
   __ subl(rdx, rcx); // rdx = no. of additional locals
-
-  // YYY
-//   __ incrementl(rdx);
-//   __ andl(rdx, -2);
 
   // see if we've got enough room on the stack for locals plus overhead.
   generate_stack_overflow_check();

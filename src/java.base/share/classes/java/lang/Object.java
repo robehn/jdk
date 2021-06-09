@@ -288,8 +288,9 @@ public class Object {
      * @see        java.lang.Object#notifyAll()
      * @see        java.lang.Object#wait()
      */
-    @IntrinsicCandidate
-    public final native void notify();
+    public final void notify() {
+        Synchronizer.notifyDo(this);
+    }
 
     /**
      * Wakes up all threads that are waiting on this object's monitor. A
@@ -313,8 +314,9 @@ public class Object {
      * @see        java.lang.Object#notify()
      * @see        java.lang.Object#wait()
      */
-    @IntrinsicCandidate
-    public final native void notifyAll();
+    public final void notifyAll() {
+        Synchronizer.notifyAllDo(this);
+    }
 
     /**
      * Causes the current thread to wait until it is awakened, typically
@@ -335,7 +337,7 @@ public class Object {
      * @see    #wait(long, int)
      */
     public final void wait() throws InterruptedException {
-        wait(0L);
+        Synchronizer.waitDo(this);
     }
 
     /**
@@ -359,7 +361,9 @@ public class Object {
      * @see    #wait()
      * @see    #wait(long, int)
      */
-    public final native void wait(long timeoutMillis) throws InterruptedException;
+    public final void wait(long timeoutMillis) throws InterruptedException {
+        Synchronizer.waitDo(this);
+    }
 
     /**
      * Causes the current thread to wait until it is awakened, typically

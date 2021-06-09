@@ -721,7 +721,6 @@ void* os::malloc(size_t size, MEMFLAGS memflags, const NativeCallStack& stack) {
 
   if ((intptr_t)ptr == (intptr_t)MallocCatchPtr) {
     log_warning(malloc, free)("os::malloc caught, " SIZE_FORMAT " bytes --> " PTR_FORMAT, size, p2i(ptr));
-    breakpoint();
   }
   if (paranoid) {
     verify_memory(ptr);
@@ -764,7 +763,6 @@ void* os::realloc(void *memblock, size_t size, MEMFLAGS memflags, const NativeCa
   }
   if ((intptr_t)memblock == (intptr_t)MallocCatchPtr) {
     log_warning(malloc, free)("os::realloc caught " PTR_FORMAT, p2i(memblock));
-    breakpoint();
   }
   // NMT support
   void* membase = MemTracker::malloc_base(memblock);
@@ -793,7 +791,6 @@ void  os::free(void *memblock) {
   if (memblock == NULL) return;
   if ((intptr_t)memblock == (intptr_t)MallocCatchPtr) {
     log_warning(malloc, free)("os::free caught " PTR_FORMAT, p2i(memblock));
-    breakpoint();
   }
   void* membase = MemTracker::record_free(memblock, MemTracker::tracking_level());
   verify_memory(membase);

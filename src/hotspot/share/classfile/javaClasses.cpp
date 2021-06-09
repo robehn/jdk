@@ -102,12 +102,6 @@ void java_lang_Object::register_natives(TRAPS) {
   InstanceKlass* obj = vmClasses::Object_klass();
   Method::register_native(obj, vmSymbols::hashCode_name(),
                           vmSymbols::void_int_signature(), (address) &JVM_IHashCode, CHECK);
-  Method::register_native(obj, vmSymbols::wait_name(),
-                          vmSymbols::long_void_signature(), (address) &JVM_MonitorWait, CHECK);
-  Method::register_native(obj, vmSymbols::notify_name(),
-                          vmSymbols::void_method_signature(), (address) &JVM_MonitorNotify, CHECK);
-  Method::register_native(obj, vmSymbols::notifyAll_name(),
-                          vmSymbols::void_method_signature(), (address) &JVM_MonitorNotifyAll, CHECK);
   Method::register_native(obj, vmSymbols::clone_name(),
                           vmSymbols::void_object_signature(), (address) &JVM_Clone, THREAD);
 }
@@ -1518,6 +1512,10 @@ void java_lang_Class::set_klass(oop java_class, Klass* klass) {
 
 
 void java_lang_Class::print_signature(oop java_class, outputStream* st) {
+  if (java_class == NULL) {
+    st->print("!<null>!");
+    return;
+  }
   assert(java_lang_Class::is_instance(java_class), "must be a Class object");
   Symbol* name = NULL;
   bool is_instance = false;
@@ -4058,8 +4056,12 @@ void java_lang_invoke_MethodType::serialize_offsets(SerializeClosure* f) {
 void java_lang_invoke_MethodType::print_signature(oop mt, outputStream* st) {
   st->print("(");
   objArrayOop pts = ptypes(mt);
-  for (int i = 0, limit = pts->length(); i < limit; i++) {
-    java_lang_Class::print_signature(pts->obj_at(i), st);
+  if (pts != NULL) {
+    for (int i = 0, limit = pts->length(); i < limit; i++) {
+      java_lang_Class::print_signature(pts->obj_at(i), st);
+    }
+  } else {
+    st->print("<NULL>");
   }
   st->print(")");
   java_lang_Class::print_signature(rtype(mt), st);

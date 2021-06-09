@@ -477,8 +477,8 @@ static void double_lock_wait(JavaThread* thread, Handle lockObject) {
   assert(calledholdinglock, "must hold lock for notify");
   assert(!is_parallelCapable(lockObject), "lockObject must not be parallelCapable");
   // These don't throw exceptions.
-  ObjectSynchronizer::BJL_notify_all();
-  ObjectSynchronizer::BJL_unlock();
+  ObjectSynchronizer::BJL_notify_all(lockObject);
+  ObjectSynchronizer::BJL_unlock(lockObject);
   SystemDictionary_lock->wait();
   SystemDictionary_lock->unlock();
   ObjectSynchronizer::BJL_lock(lockObject);

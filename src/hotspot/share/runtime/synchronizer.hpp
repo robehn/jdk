@@ -71,11 +71,16 @@ class ObjectSynchronizer : AllStatic {
   static volatile Thread* _owner;
   static volatile int _rec;
   
-  static void BJL_wait();
-  static void BJL_notify();
-  static void BJL_notify_all();
+  static void BJL_wait(Handle obj);
+  
+  static void BJL_notify(Handle obj);
+  
+  static void BJL_notify_all(Handle obj);
+  
   static void BJL_lock(Handle obj);
-  static void BJL_unlock();
+  
+  static void BJL_unlock(Handle obj);
+  static void BJL_unlock() { Handle nh; BJL_unlock(nh); };
 
   friend class VMStructs;
 
@@ -177,9 +182,9 @@ class ObjectLocker : public StackObj {
   ~ObjectLocker();
 
   // Monitor behavior
-  void wait(TRAPS)  { ObjectSynchronizer::BJL_wait(); } // wait forever
-  void notify_all(TRAPS)  { ObjectSynchronizer::BJL_notify_all(); }
-  void wait_uninterruptibly(JavaThread* current) { ObjectSynchronizer::BJL_wait(); }
+  void wait(TRAPS)  { ObjectSynchronizer::BJL_wait(_obj); } // wait forever
+  void notify_all(TRAPS)  { ObjectSynchronizer::BJL_notify_all(_obj); }
+  void wait_uninterruptibly(JavaThread* current) { ObjectSynchronizer::BJL_wait(_obj); }
 };
 
 #endif // SHARE_RUNTIME_SYNCHRONIZER_HPP
