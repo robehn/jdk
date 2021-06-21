@@ -595,32 +595,27 @@ JVM_END
 
 // java.lang.Synchronizer ///////////////////////////////////////////////
 JVM_ENTRY(void, JVM_BJL_lock(JNIEnv* env, jclass jc, jobject handle))
-//  Handle obj(THREAD, JNIHandles::resolve_non_null(handle));
-  Handle obj(THREAD, NULL);
+  Handle obj(THREAD, JNIHandles::resolve_non_null(handle));
   ObjectSynchronizer::BJL_lock(obj);
 JVM_END
 
 JVM_ENTRY(void, JVM_BJL_unlock(JNIEnv* env, jclass jc, jobject handle))
-//  Handle obj(THREAD, JNIHandles::resolve(handle));
-  Handle obj(THREAD, NULL);
+  Handle obj(THREAD, JNIHandles::resolve(handle));
   ObjectSynchronizer::BJL_unlock(obj);
 JVM_END
 
 JVM_ENTRY(void, JVM_BJL_wait(JNIEnv* env, jclass jc, jobject handle))
-//  Handle obj(THREAD, JNIHandles::resolve_non_null(handle));
-  Handle obj(THREAD, NULL);
+  Handle obj(THREAD, JNIHandles::resolve_non_null(handle));
   ObjectSynchronizer::BJL_wait(obj);
 JVM_END
 
 JVM_ENTRY(void, JVM_BJL_notify(JNIEnv* env, jclass jc, jobject handle))
-//  Handle obj(THREAD, JNIHandles::resolve_non_null(handle));
-  Handle obj(THREAD, NULL);
+  Handle obj(THREAD, JNIHandles::resolve_non_null(handle));
   ObjectSynchronizer::BJL_notify(obj);
 JVM_END
 
 JVM_ENTRY(void, JVM_BJL_notify_all(JNIEnv* env, jclass jc, jobject handle))
-//  Handle obj(THREAD, JNIHandles::resolve_non_null(handle));
-  Handle obj(THREAD, NULL);
+  Handle obj(THREAD, JNIHandles::resolve_non_null(handle));
   ObjectSynchronizer::BJL_notify_all(obj);
 JVM_END
 

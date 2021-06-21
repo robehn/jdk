@@ -66,7 +66,7 @@ volatile int ObjectSynchronizer::_rec = 0;
 
 void ObjectSynchronizer::BJL_wait(Handle obj) {
   assert(_owner == Thread::current(), "Bad:%p != %p", _owner, Thread::current());
-  assert(_rec == 0, "Bad:%p != %p", _owner, Thread::current());
+//  assert(_rec == 0, "Bad:%p != %p", _owner, Thread::current());
   ThreadBlockInVM tbivm(JavaThread::current());
   log_debug(os)("%p: %s:%d", Thread::current(), __func__, __LINE__);
   int save = _rec;

@@ -261,6 +261,8 @@ address TemplateInterpreterGenerator::generate_return_entry_for_monitor_enter() 
 
   __ os_breakpoint2();
 
+  __ pop(rax);
+
   // __ lea(rsp, Address(rsp, 0, Interpreter::stackElementScale()));
   // __ lea(rsp, Address(rsp, PA_SIZE * Interpreter::stackElementScale()));
   
@@ -288,6 +290,8 @@ address TemplateInterpreterGenerator::generate_return_entry_for_monitor_exit() {
   __ restore_locals();
   
   // __ lea(rsp, Address(rsp, 0 * Interpreter::stackElementScale()));
+  
+  __ pop(rax);
   
   int step = Bytecodes::length_for(Bytecodes::_monitorexit);
   __ dispatch_next(vtos, step, false);
