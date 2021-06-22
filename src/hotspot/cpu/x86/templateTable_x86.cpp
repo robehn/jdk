@@ -3618,11 +3618,11 @@ void TemplateTable::prepare_invoke(int byte_no,
   }
   
   if (code == Bytecodes::_monitorenter) {
-    const address addr = (address) Interpreter::monitor_enter_return_entry_adr();
+    const address addr = (address) Interpreter::monitor_enter_return_entry_adr(true);
     ExternalAddress entry(addr);
     __ lea(flags, entry);
   } else if (code == Bytecodes::_monitorexit) {
-    const address addr = (address) Interpreter::monitor_exit_return_entry_adr();
+    const address addr = (address) Interpreter::monitor_exit_return_entry_adr(true);
     ExternalAddress entry(addr);
     __ lea(flags, entry);
   } else { 
@@ -4294,85 +4294,46 @@ void TemplateTable::athrow() {
 //-----------------------------------------------------------------------------
 // Synchronization
 //
-// Note: monitorenter & exit are symmetric routines; which is reflected
-//       in the assembly code structure as well
-//
-// Stack layout:
-//
-// [expressions  ] <--- rsp               = expression stack top
-// ..
-// [expressions  ]
-// [monitor entry] <--- monitor block top = expression stack bot
-// ..
-// [monitor entry]
-// [frame data   ] <--- monitor block bot
-// ...
-// [saved rbp    ] <--- rbp
 void TemplateTable::monitorenter() {
   assert(Bytecodes::_monitorenter == bytecode(), "Bad BC");
-  // check for NULL object
-//  __ null_check(rax);
-  
-//  __ push(atos);
-
-  __ os_breakpoint();
 
   transition(vtos, vtos);
   
-  prepare_invoke(-1, rbx);  // get f1 Method*
-  
+  Register method = rbx;
+  Register flags = rdx;
+
+  // save 'interpreter return address'
+  __ save_bcp();
+
+  const address addr = (address) Interpreter::monitor_enter_return_entry_adr(true);
+  ExternalAddress entry(addr);
+  __ lea(flags, entry);
+  __ push(flags);
+
+  ExternalAddress fetch_addr((address) &vmSymbols::_monitor_enter_method);
+  __ movptr(method, fetch_addr);
   __ jump_from_interpreted(rbx, rdx);
 }
 
 void TemplateTable::monitorexit() {
   assert(Bytecodes::_monitorexit == bytecode(), "Bad BC");
-  // check for NULL object
-//  __ null_check(rax);
-  
-//  __ push(atos);
   
   transition(vtos, vtos);
   
-  prepare_invoke(-2, rbx);  // get f1 Method*
-  
+  Register method = rbx;
+  Register flags = rdx;
+
+  // save 'interpreter return address'
+  __ save_bcp();
+
+  const address addr = (address) Interpreter::monitor_exit_return_entry_adr(true);
+  ExternalAddress entry(addr);
+  __ lea(flags, entry);
+  __ push(flags);
+
+  ExternalAddress fetch_addr((address) &vmSymbols::_monitor_exit_method);
+  __ movptr(method, fetch_addr);
   __ jump_from_interpreted(rbx, rdx);
-}
-
-void TemplateTable::monitorenter2() {
-  transition(atos, vtos);
-
-  // check for NULL object
-  __ null_check(rax);
-
-  Register rmon = LP64_ONLY(c_rarg1) NOT_LP64(rdx);
-
-  // Increment bcp to point to the next bytecode, so exception
-  // handling for async. exceptions work correctly.
-  // The object has already been poped from the stack, so the
-  // expression stack looks correct.
-  __ increment(rbcp);
-
-  __ movptr(rmon, rax);
-  __ lock_object(rmon);
-
-  // check to make sure this monitor doesn't cause stack overflow after locking
-  __ save_bcp();  // in case of exception
-  __ generate_stack_overflow_check(0);
-
-  // The bcp has already been incremented. Just need to dispatch to
-  // next instruction.
-  __ dispatch_next(vtos);
-}
-
-void TemplateTable::monitorexit2() {
-  transition(atos, vtos);
-
-  // check for NULL object
-  __ null_check(rax);
-
-  __ push_ptr(rax); // make sure object is on stack (contract with oopMaps)
-  __ unlock_object();
-  __ pop_ptr(rax); // discard object
 }
 
 // Wide instructions

@@ -25,6 +25,7 @@
 #include "precompiled.hpp"
 #include "asm/macroAssembler.hpp"
 #include "classfile/javaClasses.hpp"
+#include "classfile/vmSymbols.hpp"
 #include "compiler/compiler_globals.hpp"
 #include "compiler/disassembler.hpp"
 #include "gc/shared/barrierSetAssembler.hpp"
@@ -240,8 +241,35 @@ address TemplateInterpreterGenerator::generate_return_entry_for(TosState state, 
   return entry;
 }
 
-#define PA_SIZE 0
+address TemplateInterpreterGenerator::generate_return_entry_for_monitor(int step, bool disp) {
+  address entry = __ pc();
+  
+  if (!disp) {
+    __ stop("Here");
+    __ nop(3);
+  }
 
+#ifdef COMPILER2
+  if (UseSSE < 2) {
+    __ empty_FPU_stack();
+  }
+#endif
+    
+  // Restore stack bottom in case i2c adjusted stack
+  __ movptr(rsp, Address(rbp, frame::interpreter_frame_last_sp_offset * wordSize));
+  // and NULL it as marker that esp is now tos until next java call
+  __ movptr(Address(rbp, frame::interpreter_frame_last_sp_offset * wordSize), (int32_t)NULL_WORD);
+
+  __ restore_bcp();
+  __ restore_locals();
+
+  __ pop(rax);
+
+  __ dispatch_next(vtos, step, false);
+  
+  return entry;
+}
+/*
 address TemplateInterpreterGenerator::generate_return_entry_for_monitor_enter() {
   address entry = __ pc();
 
@@ -298,7 +326,7 @@ address TemplateInterpreterGenerator::generate_return_entry_for_monitor_exit() {
 
   return entry;
 }
-
+*/
 
 address TemplateInterpreterGenerator::generate_deopt_entry_for(TosState state, int step, address continuation) {
   address entry = __ pc();
@@ -317,32 +345,6 @@ address TemplateInterpreterGenerator::generate_deopt_entry_for(TosState state, i
   __ restore_locals();
   const Register thread = NOT_LP64(rcx) LP64_ONLY(r15_thread);
   NOT_LP64(__ get_thread(thread));
-#if INCLUDE_JVMCI
-  // Check if we need to take lock at entry of synchronized method.  This can
-  // only occur on method entry so emit it only for vtos with step 0.
-  if (EnableJVMCI && state == vtos && step == 0) {
-    Label L;
-    __ cmpb(Address(thread, JavaThread::pending_monitorenter_offset()), 0);
-    __ jcc(Assembler::zero, L);
-    // Clear flag.
-    __ movb(Address(thread, JavaThread::pending_monitorenter_offset()), 0);
-    // Satisfy calling convention for lock_method().
-    __ get_method(rbx);
-    // Take lock.
-    lock_method();
-    __ bind(L);
-  } else {
-#ifdef ASSERT
-    if (EnableJVMCI) {
-      Label L;
-      __ cmpb(Address(r15_thread, JavaThread::pending_monitorenter_offset()), 0);
-      __ jcc(Assembler::zero, L);
-      __ stop("unexpected pending monitor in deopt entry");
-      __ bind(L);
-    }
-#endif
-  }
-#endif
   // handle exceptions
   {
     Label L;
@@ -600,30 +602,9 @@ void TemplateInterpreterGenerator::generate_stack_overflow_check(void) {
   __ bind(after_frame_check);
 }
 
-// Allocate monitor and lock method (asm interpreter)
-//
-// Args:
-//      rbx: Method*
-//      r14/rdi: locals
-//
-// Kills:
-//      rax
-//      c_rarg0, c_rarg1, c_rarg2, c_rarg3, ...(param regs)
-//      rscratch1, rscratch2 (scratch regs)
 void TemplateInterpreterGenerator::lock_method() {
   // synchronize method
   const Address access_flags(rbx, Method::access_flags_offset());
-
-#ifdef ASSERT
-  {
-    Label L;
-    __ movl(rax, access_flags);
-    __ testl(rax, JVM_ACC_SYNCHRONIZED);
-    __ jcc(Assembler::notZero, L);
-    __ stop("method doesn't need synchronization");
-    __ bind(L);
-  }
-#endif // ASSERT
 
   // get synchronization object
   {
@@ -634,27 +615,54 @@ void TemplateInterpreterGenerator::lock_method() {
     __ movptr(rax, Address(rlocals, Interpreter::local_offset_in_bytes(0)));
     __ jcc(Assembler::zero, done);
     __ load_mirror(rax, rbx);
-
-#ifdef ASSERT
-    {
-      Label L;
-      __ testptr(rax, rax);
-      __ jcc(Assembler::notZero, L);
-      __ stop("synchronization object is NULL");
-      __ bind(L);
-    }
-#endif // ASSERT
-
     __ bind(done);
   }
 
-  const Register lockreg = NOT_LP64(rdx) LP64_ONLY(c_rarg1);
+  Label do_synch, synch_completed;
+  __ jmp(do_synch);
   
-  // __ movptr(lockreg, rsp); // object address
-  // __ lock_object(lockreg);
+  // ##################################################################
+  // return entry for monitor enter
+  address return_adr = __ pc();
   
-  __ movptr(lockreg, rax); // object address
-  __ lock_object(lockreg);
+  #ifdef COMPILER2
+  if (UseSSE < 2) {
+    __ empty_FPU_stack();
+  }
+  #endif
+    
+  // Restore stack bottom in case i2c adjusted stack
+  __ movptr(rsp, Address(rbp, frame::interpreter_frame_last_sp_offset * wordSize));
+  // and NULL it as marker that esp is now tos until next java call
+  __ movptr(Address(rbp, frame::interpreter_frame_last_sp_offset * wordSize), (int32_t)NULL_WORD);
+
+  __ restore_bcp();
+  __ restore_locals();
+
+  __ pop(rax);
+  
+  __ jmp(synch_completed);
+  // ##################################################################
+
+  __ bind(do_synch);
+
+  Register method = rbx;
+  Register flags = rdx;
+
+  __ push(rax);
+
+  // save 'interpreter return address'
+  __ save_bcp();
+
+  InternalAddress radr(return_adr);
+  __ lea(method, radr);
+  __ push(method);
+
+  ExternalAddress fetch_addr((address) &vmSymbols::_monitor_enter_method);
+  __ movptr(method, fetch_addr);
+  __ jump_from_interpreted(rbx, rdx);
+  
+  __ bind(synch_completed);
 }
 
 // Generate a fixed interpreter frame. This is identical setup for
@@ -867,9 +875,6 @@ address TemplateInterpreterGenerator::generate_native_entry(bool synchronized) {
   // so method is not locked if overflows.
   if (synchronized) {
     lock_method();
-    //aload
-    //push atos
-    //monitorenter
   } else {
     // no synchronization necessary
 #ifdef ASSERT
@@ -1224,7 +1229,7 @@ address TemplateInterpreterGenerator::generate_native_entry(bool synchronized) {
     __ jcc(Assembler::zero, L);
     // the code below should be shared with interpreter macro
     // assembler implementation
-    __ unlock_object();
+    __ unlock_method();
     __ bind(L);
   }
 

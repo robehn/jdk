@@ -337,10 +337,6 @@ class SharedRuntime: AllStatic {
   // Find the method that called us.
   static methodHandle find_callee_method(TRAPS);
 
-  static void monitor_enter_helper(oopDesc* obj, BasicLock* lock, JavaThread* thread);
-
-  static void monitor_exit_helper(oopDesc* obj, BasicLock* lock, JavaThread* current);
-
  private:
   static Handle find_callee_info(Bytecodes::Code& bc, CallInfo& callinfo, TRAPS);
   static Handle find_callee_info_helper(vframeStream& vfst, Bytecodes::Code& bc, CallInfo& callinfo, TRAPS);

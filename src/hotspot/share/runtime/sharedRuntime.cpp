@@ -2105,25 +2105,11 @@ JRT_LEAF(void, SharedRuntime::reguard_yellow_pages())
   (void) JavaThread::current()->stack_overflow_state()->reguard_stack();
 JRT_END
 
-void SharedRuntime::monitor_enter_helper(oopDesc* obj, BasicLock* lock, JavaThread* current) {
-  JRT_BLOCK_NO_ASYNC
-  Handle h_obj(THREAD, obj);
-  ObjectSynchronizer::BJL_lock(h_obj);
-  assert(!HAS_PENDING_EXCEPTION, "Should have no exception here");
-  JRT_BLOCK_END
-}
-
 // Handles the uncommon case in locking, i.e., contention or an inflated lock.
 JRT_BLOCK_ENTRY(void, SharedRuntime::complete_monitor_locking_C(oopDesc* obj, BasicLock* lock, JavaThread* current))
   Handle h_obj(current, obj);
   ObjectSynchronizer::BJL_lock(h_obj);
 JRT_END
-
-void SharedRuntime::monitor_exit_helper(oopDesc* obj, BasicLock* lock, JavaThread* current) {
-  assert(JavaThread::current() == current, "invariant");
-  // Exit must be non-blocking, and therefore no exceptions can be thrown.
-  ObjectSynchronizer::BJL_unlock();
-}
 
 // Handles the uncommon cases of monitor unlocking in compiled code
 JRT_LEAF(void, SharedRuntime::complete_monitor_unlocking_C(oopDesc* obj, BasicLock* lock, JavaThread* current))

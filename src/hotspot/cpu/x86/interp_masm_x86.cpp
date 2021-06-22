@@ -23,6 +23,7 @@
  */
 
 #include "precompiled.hpp"
+#include "classfile/vmSymbols.hpp"
 #include "compiler/compiler_globals.hpp"
 #include "interp_masm_x86.hpp"
 #include "interpreter/interpreter.hpp"
@@ -989,8 +990,6 @@ void InterpreterMacroAssembler::remove_activation(
   Label not_synchronized;
 
   const Register rthread = LP64_ONLY(r15_thread) NOT_LP64(rcx);
-  const Register robj    = LP64_ONLY(c_rarg1) NOT_LP64(rdx);
-  const Register rmon    = LP64_ONLY(c_rarg1) NOT_LP64(rcx);
                               // monitor pointers need different register
                               // because rdx may have the result in it
   NOT_LP64(get_thread(rthread);)
@@ -1080,42 +1079,16 @@ void InterpreterMacroAssembler::get_method_counters(Register method,
   bind(has_counters);
 }
 
-
-// Lock object
-//
-// Args:
-//      rdx, c_rarg1: BasicObjectLock to be used for locking
-//
-// Kills:
-//      rax, rbx
-void InterpreterMacroAssembler::lock_object(Register lock_reg) {
-  assert(lock_reg == LP64_ONLY(c_rarg1) NOT_LP64(rdx),
-         "The argument is only for looks. It must be c_rarg1");
-
-    call_VM(noreg, CAST_FROM_FN_PTR(address, InterpreterRuntime::monitorenter), lock_reg);
+void InterpreterMacroAssembler::unlock_object() {
 }
+
+//  stop("Bad call");
+//  call_VM_leaf(CAST_FROM_FN_PTR(address, InterpreterRuntime::monitorexit));
 
 void InterpreterMacroAssembler::poop(Register lock_reg) {
   assert(lock_reg == LP64_ONLY(c_rarg1) NOT_LP64(rdx),
          "The argument is only for looks. It must be c_rarg1");
   call_VM(noreg, CAST_FROM_FN_PTR(address, InterpreterRuntime::poop), lock_reg);
-}
-
-
-// Unlocks an object. Used in monitorexit bytecode and
-// remove_activation.  Throws an IllegalMonitorException if object is
-// not locked by current thread.
-//
-// Args:
-//      rdx, c_rarg1: BasicObjectLock for lock
-//
-// Kills:
-//      rax
-//      c_rarg0, c_rarg1, c_rarg2, c_rarg3, ... (param regs)
-//      rscratch1 (scratch reg)
-// rax, rbx, rcx, rdx
-void InterpreterMacroAssembler::unlock_object() {
-  call_VM_leaf(CAST_FROM_FN_PTR(address, InterpreterRuntime::monitorexit));
 }
 
 void InterpreterMacroAssembler::test_method_data_pointer(Register mdp,

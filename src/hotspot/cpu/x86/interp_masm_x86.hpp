@@ -195,6 +195,8 @@ class InterpreterMacroAssembler: public MacroAssembler {
   // a subtype of super_klass.
   void gen_subtype_check( Register sub_klass, Label &ok_is_subtype );
 
+  void sync_monitorenter();
+
   // Dispatching
   void dispatch_prolog(TosState state, int step = 0);
   void dispatch_epilog(TosState state, int step = 0);
@@ -233,7 +235,6 @@ class InterpreterMacroAssembler: public MacroAssembler {
 
   // Object locking
   void poop(Register lock_reg);
-  void lock_object(Register lock_reg);
   void unlock_object();
 
   // Interpreter profiling operations
