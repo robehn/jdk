@@ -747,6 +747,7 @@ class vmSymbols: AllStatic {
  public:
   static Method* _monitor_enter_method;
   static Method* _monitor_exit_method;
+  static Method* _monitor_exit_method_no_obj;
 
   static constexpr bool is_valid_id(int id) {
     return (id >= FIRST_SID && id < SID_LIMIT);

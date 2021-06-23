@@ -617,52 +617,11 @@ void TemplateInterpreterGenerator::lock_method() {
     __ load_mirror(rax, rbx);
     __ bind(done);
   }
+  __ lock_object();
+}
 
-  Label do_synch, synch_completed;
-  __ jmp(do_synch);
-  
-  // ##################################################################
-  // return entry for monitor enter
-  address return_adr = __ pc();
-  
-  #ifdef COMPILER2
-  if (UseSSE < 2) {
-    __ empty_FPU_stack();
-  }
-  #endif
-    
-  // Restore stack bottom in case i2c adjusted stack
-  __ movptr(rsp, Address(rbp, frame::interpreter_frame_last_sp_offset * wordSize));
-  // and NULL it as marker that esp is now tos until next java call
-  __ movptr(Address(rbp, frame::interpreter_frame_last_sp_offset * wordSize), (int32_t)NULL_WORD);
-
-  __ restore_bcp();
-  __ restore_locals();
-
-  __ pop(rax);
-  
-  __ jmp(synch_completed);
-  // ##################################################################
-
-  __ bind(do_synch);
-
-  Register method = rbx;
-  Register flags = rdx;
-
-  __ push(rax);
-
-  // save 'interpreter return address'
-  __ save_bcp();
-
-  InternalAddress radr(return_adr);
-  __ lea(method, radr);
-  __ push(method);
-
-  ExternalAddress fetch_addr((address) &vmSymbols::_monitor_enter_method);
-  __ movptr(method, fetch_addr);
-  __ jump_from_interpreted(rbx, rdx);
-  
-  __ bind(synch_completed);
+void TemplateInterpreterGenerator::unlock_method() {
+  __ unlock_object();
 }
 
 // Generate a fixed interpreter frame. This is identical setup for
@@ -1229,7 +1188,7 @@ address TemplateInterpreterGenerator::generate_native_entry(bool synchronized) {
     __ jcc(Assembler::zero, L);
     // the code below should be shared with interpreter macro
     // assembler implementation
-    __ unlock_method();
+    unlock_method();
     __ bind(L);
   }
 

@@ -1037,8 +1037,7 @@ void InterpreterMacroAssembler::remove_activation(
 
   // remove activation
   // get sender sp
-  movptr(rbx,
-         Address(rbp, frame::interpreter_frame_sender_sp_offset * wordSize));
+  movptr(rbx, Address(rbp, frame::interpreter_frame_sender_sp_offset * wordSize));
   if (StackReservedPages > 0) {
     // testing if reserved zone needs to be re-enabled
     Register rthread = LP64_ONLY(r15_thread) NOT_LP64(rcx);
@@ -1079,11 +1078,120 @@ void InterpreterMacroAssembler::get_method_counters(Register method,
   bind(has_counters);
 }
 
-void InterpreterMacroAssembler::unlock_object() {
+void InterpreterMacroAssembler::lock_object() {
+
+  Label do_synch, synch_completed;
+  jmp(do_synch);
+  
+  // ##################################################################
+  // return entry for monitor enter
+  address return_adr = pc();
+  
+  #ifdef COMPILER2
+  if (UseSSE < 2) {
+    empty_FPU_stack();
+  }
+  #endif
+    
+  // Restore stack bottom in case i2c adjusted stack
+  movptr(rsp, Address(rbp, frame::interpreter_frame_last_sp_offset * wordSize));
+  // and NULL it as marker that esp is now tos until next java call
+  movptr(Address(rbp, frame::interpreter_frame_last_sp_offset * wordSize), (int32_t)NULL_WORD);
+
+  restore_bcp();
+  restore_locals();
+
+  pop(rax);
+  
+  jmp(synch_completed);
+  // ##################################################################
+
+  bind(do_synch);
+
+  Register method = rbx;
+  Register flags = rdx;
+
+  push(rax);
+
+  // save 'interpreter return address'
+  save_bcp();
+
+  InternalAddress radr(return_adr);
+  lea(method, radr);
+  push(method);
+
+  ExternalAddress fetch_addr((address) &vmSymbols::_monitor_enter_method);
+  movptr(method, fetch_addr);
+  jump_from_interpreted(rbx, rdx);
+  
+  bind(synch_completed);
 }
 
-//  stop("Bad call");
+void InterpreterMacroAssembler::unlock_object() {
 //  call_VM_leaf(CAST_FROM_FN_PTR(address, InterpreterRuntime::monitorexit));
+
+  /*
+  // synchronize method
+  const Address access_flags(rbx, Method::access_flags_offset());
+
+  // get synchronization object
+  {
+    Label done;
+    movl(rax, access_flags);
+    testl(rax, JVM_ACC_STATIC);
+    // get receiver (assume this is frequent case)
+    movptr(rax, Address(rlocals, Interpreter::local_offset_in_bytes(0)));
+    jcc(Assembler::zero, done);
+    load_mirror(rax, rbx);
+    bind(done);
+  }*/
+
+  Label do_synch, synch_completed;
+  jmp(do_synch);
+  
+  // ##################################################################
+  // return entry for monitor enter
+  address return_adr = pc();
+  
+  #ifdef COMPILER2
+  if (UseSSE < 2) {
+    empty_FPU_stack();
+  }
+  #endif
+    
+  // Restore stack bottom in case i2c adjusted stack
+  movptr(rsp, Address(rbp, frame::interpreter_frame_last_sp_offset * wordSize));
+  // and NULL it as marker that esp is now tos until next java call
+  movptr(Address(rbp, frame::interpreter_frame_last_sp_offset * wordSize), (int32_t)NULL_WORD);
+
+  restore_bcp();
+  restore_locals();
+
+//  pop(rax);
+  
+  jmp(synch_completed);
+  // ##################################################################
+
+  bind(do_synch);
+
+  Register method = rbx;
+  Register flags = rdx;
+
+//  push(rax);
+
+  // save 'interpreter return address'
+  save_bcp();
+
+  InternalAddress radr(return_adr);
+  lea(method, radr);
+  push(method);
+
+  ExternalAddress fetch_addr((address) &vmSymbols::_monitor_exit_method_no_obj);
+  movptr(method, fetch_addr);
+  jump_from_interpreted(rbx, rdx);
+  
+  bind(synch_completed);
+}
 
 void InterpreterMacroAssembler::poop(Register lock_reg) {
   assert(lock_reg == LP64_ONLY(c_rarg1) NOT_LP64(rdx),

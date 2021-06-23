@@ -41,6 +41,7 @@ Symbol* vmSymbols::_type_signatures[T_VOID+1] = { NULL /*, NULL...*/ };
   
 Method* vmSymbols::_monitor_enter_method = NULL;
 Method* vmSymbols::_monitor_exit_method = NULL;
+Method* vmSymbols::_monitor_exit_method_no_obj = NULL;
 
 inline int compare_symbol(const Symbol* a, const Symbol* b) {
   if (a == b)  return 0;

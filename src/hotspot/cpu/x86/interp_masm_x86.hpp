@@ -235,6 +235,7 @@ class InterpreterMacroAssembler: public MacroAssembler {
 
   // Object locking
   void poop(Register lock_reg);
+  void lock_object();
   void unlock_object();
 
   // Interpreter profiling operations
