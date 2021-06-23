@@ -1401,7 +1401,7 @@ void SystemDictionary::define_instance_class(InstanceKlass* k, Handle class_load
   // find_or_define_instance_class to get here, we have a timing
   // hole with systemDictionary updates and check_constraints
   if (!is_parallelCapable(class_loader)) {
-    assert(ObjectSynchronizer::owns_BJL(THREAD->as_Java_thread(),
+    assert(ObjectSynchronizer::owns_BJL(THREAD,
            get_loader_lock_or_null(class_loader)),
            "define called without lock");
   }
