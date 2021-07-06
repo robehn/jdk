@@ -37,4 +37,10 @@
 
 #define WB_END JNI_END
 
+#define WB_SPEC_ENTRY(result_type, header) JRT_LEAF(result_type, header) \
+  ClearPendingJniExcCheck _clearCheck(env); \
+  MACOS_AARCH64_ONLY(ThreadWXEnable _wx(WXWrite, thread));
+
+#define WB_SPEC_ENTRY_END JRT_END
+
 #endif // SHARE_PRIMS_WHITEBOX_INLINE_HPP

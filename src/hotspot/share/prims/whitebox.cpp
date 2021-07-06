@@ -2122,6 +2122,23 @@ WB_ENTRY(void, WB_AsyncHandshakeWalkStack(JNIEnv* env, jobject wb, jobject threa
   }
 WB_END
 
+static volatile int _emulated_lock = 0;
+
+WB_SPEC_ENTRY(void, WB_LockAndBlock(JNIEnv* env, jobject wb))
+  //   debug_only(NoSafepointVerifier __nsv;)
+  while (Atomic::cmpxchg(&_emulated_lock, 0, 1) != 0) ;
+  assert(_emulated_lock == 1, "Not locked");
+  JavaThread* jt = JavaThread::current();
+  jt->set_thread_state(_thread_in_vm);
+  {
+    debug_only(PauseNoSafepointVerifier pnsv(&__nsv);)
+    ThreadBlockInVM tbivm(JavaThread::current());
+    os::naked_short_sleep(10);
+  }
+  jt->set_thread_state(_thread_in_Java);
+  Atomic::store(&_emulated_lock, 0);
+WB_SPEC_ENTRY_END
+
 //Some convenience methods to deal with objects from java
 int WhiteBox::offset_for_field(const char* field_name, oop object,
     Symbol* signature_symbol) {
@@ -2613,6 +2630,9 @@ static JNINativeMethod methods[] = {
   {CC"handshakeReadMonitors", CC"(Ljava/lang/Thread;)Z", (void*)&WB_HandshakeReadMonitors },
   {CC"handshakeWalkStack", CC"(Ljava/lang/Thread;Z)I", (void*)&WB_HandshakeWalkStack },
   {CC"asyncHandshakeWalkStack", CC"(Ljava/lang/Thread;)V", (void*)&WB_AsyncHandshakeWalkStack },
+
+  {CC"lockAndBlock", CC"()V", (void*)&WB_LockAndBlock},
+
   {CC"checkThreadObjOfTerminatingThread", CC"(Ljava/lang/Thread;)V", (void*)&WB_CheckThreadObjOfTerminatingThread },
   {CC"verifyFrames",                CC"(ZZ)V",            (void*)&WB_VerifyFrames },
   {CC"addCompilerDirective",    CC"(Ljava/lang/String;)I",

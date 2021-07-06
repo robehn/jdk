@@ -28,6 +28,7 @@
 #include "runtime/safepointMechanism.hpp"
 
 #include "runtime/atomic.hpp"
+#include "runtime/handshake.hpp"
 #include "runtime/safepoint.hpp"
 #include "runtime/thread.inline.hpp"
 
@@ -61,11 +62,16 @@ bool SafepointMechanism::global_poll() {
   return (SafepointSynchronize::_state != SafepointSynchronize::_not_synchronized);
 }
 
-bool SafepointMechanism::should_process(JavaThread* thread) {
-  return local_poll_armed(thread);
+bool SafepointMechanism::should_process(JavaThread* thread, bool allow_suspend) {
+  if (!local_poll_armed(thread)) {
+    return false;
+  } else if (allow_suspend) {
+    return true;
+  }
+  return should_process_no_async(thread);
 }
 
-void SafepointMechanism::process_if_requested(JavaThread* thread) {
+void SafepointMechanism::process_if_requested(JavaThread* thread, bool allow_suspend) {
 
   // Macos/aarch64 should be in the right state for safepoint (e.g.
   // deoptimization needs WXWrite).  Crashes caused by the wrong state rarely
@@ -77,7 +83,7 @@ void SafepointMechanism::process_if_requested(JavaThread* thread) {
 #endif
 
   if (local_poll_armed(thread)) {
-    process_if_requested_slow(thread);
+    process_if_requested_slow(thread, allow_suspend);
   }
 }
 

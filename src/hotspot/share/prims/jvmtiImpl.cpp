@@ -774,7 +774,15 @@ VM_GetReceiver::VM_GetReceiver(
 //
 
 bool JvmtiSuspendControl::suspend(JavaThread *java_thread) {
-  return java_thread->java_suspend();
+  bool ret = java_thread->java_suspend();
+  JavaThread *self = JavaThread::current();
+  // When suspending yourself JVM TI test expects this thread not to return.
+  // But if we hold a lock we may not suspend.
+  if (java_thread == self) {
+    assert(!self->owns_locks(), "May not hold locks if self suspending.");
+    SafepointMechanism::process_if_requested(self); // Suspend here
+  }
+  return ret;
 }
 
 bool JvmtiSuspendControl::resume(JavaThread *java_thread) {

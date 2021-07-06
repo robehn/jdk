@@ -77,6 +77,7 @@ class HandshakeOperation : public CHeapObj<mtThread> {
   int32_t pending_threads()        { return Atomic::load(&_pending_threads); }
   const char* name()               { return _handshake_cl->name(); }
   bool is_async()                  { return _handshake_cl->is_async(); }
+  bool is_suspend()                { return _handshake_cl->is_suspend(); }
 };
 
 class AsyncHandshakeOperation : public HandshakeOperation {
@@ -376,6 +377,7 @@ void Handshake::execute(HandshakeClosure* hs_cl, JavaThread* target) {
     // Check for pending handshakes to avoid possible deadlocks where our
     // target is trying to handshake us.
     if (SafepointMechanism::should_process(self)) {
+      // Will not suspend here.
       ThreadBlockInVM tbivm(self);
     }
     hsy.process();
@@ -425,11 +427,19 @@ bool HandshakeState::operation_pending(HandshakeOperation* op) {
   return _queue.contains(mo);
 }
 
-HandshakeOperation* HandshakeState::get_op_for_self() {
+static bool no_suspend_filter(HandshakeOperation* op) {
+  return !op->is_suspend();
+}
+
+HandshakeOperation* HandshakeState::get_op_for_self(bool allow_suspend) {
   assert(_handshakee == Thread::current(), "Must be called by self");
   assert(_lock.owned_by_self(), "Lock must be held");
-  return _queue.peek();
-};
+  if (allow_suspend) {
+    return _queue.peek();
+  } else {
+    return _queue.peek(no_suspend_filter);
+  }
+}
 
 static bool non_self_queue_filter(HandshakeOperation* op) {
   return !op->is_async();
@@ -439,6 +449,11 @@ bool HandshakeState::have_non_self_executable_operation() {
   assert(_handshakee != Thread::current(), "Must not be called by self");
   assert(_lock.owned_by_self(), "Lock must be held");
   return _queue.contains(non_self_queue_filter);
+}
+
+bool HandshakeState::has_none_suspend_operation() {
+  MutexLocker ml(&_lock, Mutex::_no_safepoint_check_flag);
+  return _queue.contains(no_suspend_filter);
 }
 
 HandshakeOperation* HandshakeState::get_op() {
@@ -454,7 +469,7 @@ void HandshakeState::remove_op(HandshakeOperation* op) {
   assert(ret == op, "Popped op must match requested op");
 };
 
-bool HandshakeState::process_by_self() {
+bool HandshakeState::process_by_self(bool allow_suspend) {
   assert(Thread::current() == _handshakee, "should call from _handshakee");
   assert(!_handshakee->is_terminated(), "should not be a terminated thread");
   assert(_handshakee->thread_state() != _thread_blocked, "should not be in a blocked state");
@@ -465,14 +480,20 @@ bool HandshakeState::process_by_self() {
     // The exception to this rule is the asynchronous suspension handshake.
     // It by-passes the NSV by manually doing the transition.
     NoSafepointVerifier nsv;
-    return process_self_inner();
+    return process_self_inner(allow_suspend);
   }
 }
 
-bool HandshakeState::process_self_inner() {
+bool HandshakeState::process_self_inner(bool allow_suspend) {
   while (has_operation()) {
     MutexLocker ml(&_lock, Mutex::_no_safepoint_check_flag);
-    HandshakeOperation* op = get_op_for_self();
+    // IF there is a suspend has_operation always returns true when
+    // allow_suspend is false, since we do not pop that off.The queue must be
+    // checked with lock held, so we do the real check here instead.
+    if (!allow_suspend && !_queue.contains(no_suspend_filter)) {
+      return false;
+    }
+    HandshakeOperation* op = get_op_for_self(allow_suspend);
     if (op != NULL) {
       assert(op->_target == NULL || op->_target == Thread::current(), "Wrong thread");
       bool async = op->is_async();
@@ -621,6 +642,7 @@ class ThreadSelfSuspensionHandshake : public AsyncHandshakeClosure {
     assert(current == Thread::current(), "Must be self executed.");
     current->handshake_state()->do_self_suspend();
   }
+  virtual bool is_suspend() { return true; }
 };
 
 bool HandshakeState::suspend_with_handshake() {
