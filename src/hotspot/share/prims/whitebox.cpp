@@ -2126,7 +2126,7 @@ static volatile int _emulated_lock = 0;
 
 WB_SPEC_ENTRY(void, WB_LockAndBlock(JNIEnv* env, jobject wb))
   //   debug_only(NoSafepointVerifier __nsv;)
-  while (Atomic::cmpxchg(&_emulated_lock, 0, 1) != 0) ;
+  while (Atomic::cmpxchg(&_emulated_lock, 0, 1) != 0) {}
   assert(_emulated_lock == 1, "Not locked");
   JavaThread* jt = JavaThread::current();
   jt->set_thread_state(_thread_in_vm);
