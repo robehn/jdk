@@ -3039,7 +3039,8 @@ void MacroAssembler::check_klass_subtype_slow_path(Register sub_klass,
   bind(L_fallthrough);
 }
 
-// Defines obj, preserves var_size_in_bytes, okay for tmp2 == var_size_in_bytes.
+// Defines obj, preserves var_size_in_bytes
+// ========> NO okay for tmp2 == var_size_in_bytes.
 void MacroAssembler::tlab_allocate(Register obj,
                                    Register var_size_in_bytes,
                                    int con_size_in_bytes,

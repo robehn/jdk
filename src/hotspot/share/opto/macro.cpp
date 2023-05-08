@@ -1164,8 +1164,8 @@ Node* PhaseMacroExpand::make_store(Node* ctl, Node* mem, Node* base, int offset,
 // down.  If contended, repeat at step 3.  If using TLABs normal-store
 // adjusted heap top back down; there is no contention.
 //
-// 6) If !ZeroTLAB then Bulk-clear the object/array.  Fill in klass & mark
-// fields.
+// 6) If !(ZeroTLAB || AllocatePrefetchZeroing) then Bulk-clear the object/array.
+// Fill in klass & mark fields.
 //
 // 7) Merge with the slow-path; cast the raw memory pointer to the correct
 // oop flavor.
@@ -1689,7 +1689,7 @@ PhaseMacroExpand::initialize_object(AllocateNode* alloc,
     // there can be two Allocates to one Initialize.  The answer in all these
     // edge cases is safety first.  It is always safe to clear immediately
     // within an Allocate, and then (maybe or maybe not) clear some more later.
-    if (!(UseTLAB && ZeroTLAB)) {
+    if (!(UseTLAB && (ZeroTLAB || AllocatePrefetchZeroing))) {
       rawmem = ClearArrayNode::clear_memory(control, rawmem, object,
                                             header_size, size_in_bytes,
                                             &_igvn);
@@ -1715,7 +1715,7 @@ PhaseMacroExpand::initialize_object(AllocateNode* alloc,
 Node* PhaseMacroExpand::prefetch_allocation(Node* i_o, Node*& needgc_false,
                                         Node*& contended_phi_rawmem,
                                         Node* old_eden_top, Node* new_eden_top,
-                                        intx lines) {
+                                        intx prefetch_lines) {
    enum { fall_in_path = 1, pf_path = 2 };
    if( UseTLAB && AllocatePrefetchStyle == 2 ) {
       // Generate prefetch allocation with watermark check.
@@ -1776,7 +1776,7 @@ Node* PhaseMacroExpand::prefetch_allocation(Node* i_o, Node*& needgc_false,
       uint step_size = AllocatePrefetchStepSize;
       uint distance = 0;
 
-      for ( intx i = 0; i < lines; i++ ) {
+      for ( intx i = 0; i < prefetch_lines; i++ ) {
         prefetch_adr = new AddPNode( old_pf_wm, new_pf_wmt,
                                             _igvn.MakeConX(distance) );
         transform_later(prefetch_adr);
@@ -1829,7 +1829,7 @@ Node* PhaseMacroExpand::prefetch_allocation(Node* i_o, Node*& needgc_false,
       contended_phi_rawmem = prefetch;
       Node *prefetch_adr;
       distance = step_size;
-      for ( intx i = 1; i < lines; i++ ) {
+      for ( intx i = 1; i < prefetch_lines; i++ ) {
         prefetch_adr = new AddPNode( cache_adr, cache_adr,
                                             _igvn.MakeConX(distance) );
         transform_later(prefetch_adr);
@@ -1845,7 +1845,7 @@ Node* PhaseMacroExpand::prefetch_allocation(Node* i_o, Node*& needgc_false,
       // Generate several prefetch instructions.
       uint step_size = AllocatePrefetchStepSize;
       uint distance = AllocatePrefetchDistance;
-      for ( intx i = 0; i < lines; i++ ) {
+      for ( intx i = 0; i < prefetch_lines; i++ ) {
         prefetch_adr = new AddPNode( old_eden_top, new_eden_top,
                                             _igvn.MakeConX(distance) );
         transform_later(prefetch_adr);

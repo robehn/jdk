@@ -5422,6 +5422,21 @@ instruct prefetchalloc( memory mem ) %{
   ins_pipe(iload_prefetch);
 %}
 
+instruct prefetchallocZeroing( memory mem ) %{
+  predicate(UseZicboz && AllocatePrefetchZeroing);
+  match(PrefetchAllocationZeroing mem);
+
+  ins_cost(ALU_COST * 1);
+  format %{ "prefetchzeroing $mem\t# Prefetch and zero" %}
+
+  ins_encode %{
+    BarrierSetAssembler *bs = BarrierSet::barrier_set()->barrier_set_assembler();
+    bs->prefetch_zero(&_masm, as_Register($mem$$base), true);
+  %}
+
+  ins_pipe(iload_prefetch);
+%}
+
 // ============================================================================
 // Atomic operation instructions
 //

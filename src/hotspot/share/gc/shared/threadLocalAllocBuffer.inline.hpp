@@ -40,16 +40,42 @@ inline HeapWord* ThreadLocalAllocBuffer::allocate(size_t size) {
   HeapWord* obj = top();
   if (pointer_delta(end(), obj) >= size) {
     // successful thread-local allocation
-#ifdef ASSERT
-    // Skip mangling the space corresponding to the object header to
-    // ensure that the returned space is not considered parsable by
-    // any concurrent GC thread.
-    size_t hdr_size = oopDesc::header_size();
-    Copy::fill_to_words(obj + hdr_size, size - hdr_size, badHeapWordVal);
-#endif // ASSERT
     // This addition is safe because we know that top is
     // at least size below end, so the add can't wrap.
     set_top(obj + size);
+
+    if (!AllocatePrefetchZeroing) {
+#ifdef ASSERT
+      // Skip mangling the space corresponding to the object header to
+      // ensure that the returned space is not considered parsable by
+      // any concurrent GC thread.
+      size_t hdr_size = oopDesc::header_size();
+      Copy::fill_to_words(obj + hdr_size, size - hdr_size, badHeapWordVal);
+#endif // ASSERT
+    } else {
+      const intptr_t prefetch_lines = 1; // MAX2(AllocatePrefetchLines, AllocateInstancePrefetchLines);
+      const intptr_t prefetch_size = AllocatePrefetchStepSize;
+      assert(AllocatePrefetchStepSize == 64, "Not good");
+
+      const intptr_t prefetch_mask = ~(prefetch_size - 1);
+      const intptr_t prefetch_distance = (prefetch_lines + 1) * prefetch_size;
+
+      HeapWord *old_pf_top = pf_top();
+      HeapWord *new_pf_top = (HeapWord*)((((intptr_t)(top())) & prefetch_mask) + prefetch_distance);
+
+      assert(top() > obj, "Must be %p %p", top(), obj);
+      assert(old_pf_top >= obj, "Must be: %p %p", old_pf_top, obj);
+      assert(new_pf_top >= top(), "Must be %p %p", new_pf_top, top());
+
+      if (old_pf_top < new_pf_top) {
+        set_pf_top(new_pf_top);
+        Copy::fill_to_aligned_words(old_pf_top, new_pf_top - old_pf_top, 0);
+      } else {
+        assert(old_pf_top == new_pf_top, "Must be");
+      }
+      // Check against new top()
+      assert(pf_top() > top(), "Must be");
+    }
 
     invariants();
     return obj;

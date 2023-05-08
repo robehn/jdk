@@ -223,7 +223,7 @@ void C1_MacroAssembler::initialize_object(Register obj, Register klass, Register
 
   initialize_header(obj, klass, noreg, tmp1, tmp2);
 
-  if (!(UseTLAB && ZeroTLAB && is_tlab_allocated)) {
+  if (!(UseTLAB && (ZeroTLAB || AllocatePrefetchZeroing) && is_tlab_allocated)) {
     // clear rest of allocated space
     const Register index = tmp2;
     // 16: multiplier for threshold
@@ -301,6 +301,7 @@ void C1_MacroAssembler::allocate_array(Register obj, Register len, Register tmp1
   initialize_header(obj, klass, len, tmp1, tmp2);
 
   // clear rest of allocated space
+  // if (!AllocatePrefetchZeroing) when not slow case.
   const Register len_zero = len;
   initialize_body(obj, arr_size, header_size * BytesPerWord, len_zero);
 

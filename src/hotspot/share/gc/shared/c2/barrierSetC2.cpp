@@ -741,16 +741,31 @@ Node* BarrierSetC2::obj_allocate(PhaseMacroExpand* macro, Node* mem, Node* toobi
   macro->transform_later(needgc_false);
 
   // Fast path:
-  i_o = macro->prefetch_allocation(i_o, needgc_false, mem,
-                                   old_tlab_top, new_tlab_top, prefetch_lines);
+  if (UseTLAB && AllocatePrefetchZeroing) {
+    Node* prefetch = new PrefetchAllocationZeroingNode(mem, new_tlab_top);
+//    Node* prefetch = new PrefetchAllocationNode(mem, new_tlab_top);
+    prefetch->set_req(0, needgc_false);
+    macro->transform_later(prefetch);
+    mem = prefetch;
 
-  // Store the modified TLAB top back down.
-  Node* store_tlab_top = new StorePNode(needgc_false, mem, tlab_top_adr,
-                   TypeRawPtr::BOTTOM, new_tlab_top, MemNode::unordered);
-  macro->transform_later(store_tlab_top);
+    // Store the modified TLAB top back down.
+    Node* store_tlab_top = new StorePNode(needgc_false, mem, tlab_top_adr, TypeRawPtr::BOTTOM, new_tlab_top, MemNode::unordered);
+    macro->transform_later(store_tlab_top);
+    
+    fast_oop_ctrl = needgc_false;
+    fast_oop_rawmem = store_tlab_top;
 
-  fast_oop_ctrl = needgc_false;
-  fast_oop_rawmem = store_tlab_top;
+  } else {
+    i_o = macro->prefetch_allocation(i_o, needgc_false, mem, old_tlab_top, new_tlab_top, prefetch_lines);
+    // Store the modified TLAB top back down.
+    Node* store_tlab_top = new StorePNode(needgc_false, mem, tlab_top_adr,
+                       TypeRawPtr::BOTTOM, new_tlab_top, MemNode::unordered);
+    macro->transform_later(store_tlab_top);
+    
+    fast_oop_ctrl = needgc_false;
+    fast_oop_rawmem = store_tlab_top;
+  }
+    
   return old_tlab_top;
 }
 

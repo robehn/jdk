@@ -88,6 +88,8 @@ public:
     bool is_far = false
   );
 
+  void prefetch_zero(MacroAssembler* masm, Register new_tlab_top, bool c2 = false);
+
   virtual void barrier_stubs_init() {}
 
   virtual NMethodPatchingType nmethod_patching_type() { return NMethodPatchingType::stw_instruction_and_data_patch; }

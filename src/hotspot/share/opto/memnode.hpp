@@ -1678,4 +1678,15 @@ public:
   virtual const Type *bottom_type() const { return ( AllocatePrefetchStyle == 3 ) ? Type::MEMORY : Type::ABIO; }
 };
 
+//class PrefetchAllocationZeroingNode : public MemNode {
+class PrefetchAllocationZeroingNode : public Node {
+public:
+//  PrefetchAllocationZeroingNode(Node *ctrl, Node *mem, Node *adr) : Node(ctrl, mem, adr) {}
+  PrefetchAllocationZeroingNode(Node *ctrl, Node *adr) : Node(0, ctrl, adr) {}
+  virtual int Opcode() const;
+  virtual uint ideal_reg() const { return NotAMachineReg; }
+  virtual uint match_edge(uint idx) const { return idx==2; }
+  virtual const Type *bottom_type() const { return Type::MEMORY; }
+};
+
 #endif // SHARE_OPTO_MEMNODE_HPP

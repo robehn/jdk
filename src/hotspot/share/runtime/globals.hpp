@@ -1258,6 +1258,9 @@ const int ObjectAlignmentInBytes = 8;
           "Select instruction to prefetch ahead of allocation pointer")     \
           constraint(AllocatePrefetchInstrConstraintFunc, AfterMemoryInit)  \
                                                                             \
+  product(bool, AllocatePrefetchZeroing, false, EXPERIMENTAL,               \
+          "Zero out memory when prefetching on allocations")                \
+                                                                            \
   /* deoptimization */                                                      \
   product(bool, TraceDeoptimization, false, DIAGNOSTIC,                     \
           "Trace deoptimization")                                           \

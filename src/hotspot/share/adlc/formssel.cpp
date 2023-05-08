@@ -3529,7 +3529,7 @@ int MatchNode::needs_ideal_memory_edge(FormDict &globals) const {
     "ClearArray"
   };
   int cnt = sizeof(needs_ideal_memory_list)/sizeof(char*);
-  if( strcmp(_opType,"PrefetchAllocation")==0 )
+  if( strcmp(_opType,"PrefetchAllocation")==0 || strcmp(_opType,"PrefetchAllocationZeroing")==0)
     return 1;
   if( strcmp(_opType,"CacheWB")==0 )
     return 1;

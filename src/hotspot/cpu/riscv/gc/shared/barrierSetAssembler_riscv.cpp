@@ -178,33 +178,91 @@ void BarrierSetAssembler::try_resolve_jobject_in_native(MacroAssembler* masm, Re
   __ ld(obj, Address(obj, 0));             // *obj
 }
 
+void BarrierSetAssembler::prefetch_zero(MacroAssembler* masm, Register new_tlab_top, bool c2) {
+
+  const intptr_t prefetch_lines = 1; //MAX2(AllocatePrefetchLines, AllocateInstancePrefetchLines);
+  const intptr_t prefetch_size = AllocatePrefetchStepSize;
+  const intptr_t prefetch_mask = ~(prefetch_size - 1);
+  const intptr_t prefetch_distance = (prefetch_lines + 1) * prefetch_size;
+
+  assert_different_registers(new_tlab_top, t0, t1, noreg);
+
+  Register current_pf_top = t1;
+  __ ld(current_pf_top, Address(xthread, JavaThread::tlab_pf_top_offset()));
+
+  // Make sure we prefetch and zero beyond object end, i.e. new_tlab_top.
+  Register new_pf_top = t0;
+  __ andi(new_pf_top, new_tlab_top, prefetch_mask); // end no longer valid
+  __ addi(new_pf_top, new_pf_top, prefetch_distance);
+
+  // Do we need to prefetch and zero ?
+  Label SKIP_PREFETCH;
+  __ bgeu(current_pf_top, new_pf_top, SKIP_PREFETCH);
+
+  // Store new top
+  __ sd(new_pf_top, Address(xthread, JavaThread::tlab_pf_top_offset()));
+
+  {
+    Label LOOP;
+    __ bind(LOOP);
+    __ cbo_zero(current_pf_top);
+    __ addi(current_pf_top, current_pf_top, prefetch_size);
+    __ bltu(current_pf_top, new_pf_top, LOOP);
+  }
+  __ bind(SKIP_PREFETCH);
+  if (c2) {
+//     __ stop("Check");
+  }
+}
+
 // Defines obj, preserves var_size_in_bytes, okay for tmp2 == var_size_in_bytes.
-void BarrierSetAssembler::tlab_allocate(MacroAssembler* masm, Register obj,
+void BarrierSetAssembler::tlab_allocate(MacroAssembler* masm,
+                                        Register obj,
                                         Register var_size_in_bytes,
                                         int con_size_in_bytes,
                                         Register tmp1,
                                         Register tmp2,
                                         Label& slow_case,
                                         bool is_far) {
-  assert_different_registers(obj, tmp2);
-  assert_different_registers(obj, var_size_in_bytes);
-  Register end = tmp2;
+  assert_different_registers(obj, tmp1, tmp2, noreg);
+  assert_different_registers(obj, var_size_in_bytes, tmp1);
+
+  Register new_tlab_top = tmp1;
 
   __ ld(obj, Address(xthread, JavaThread::tlab_top_offset()));
   if (var_size_in_bytes == noreg) {
-    __ la(end, Address(obj, con_size_in_bytes));
+    __ la(new_tlab_top, Address(obj, con_size_in_bytes));
   } else {
-    __ add(end, obj, var_size_in_bytes);
+    __ add(new_tlab_top, obj, var_size_in_bytes);
   }
   __ ld(t0, Address(xthread, JavaThread::tlab_end_offset()));
-  __ bgtu(end, t0, slow_case, is_far);
+  __ bgtu(new_tlab_top, t0, slow_case, is_far);
 
   // update the tlab top pointer
-  __ sd(end, Address(xthread, JavaThread::tlab_top_offset()));
+  __ sd(new_tlab_top, Address(xthread, JavaThread::tlab_top_offset()));
 
-  // recover var_size_in_bytes if necessary
-  if (var_size_in_bytes == end) {
-    __ sub(var_size_in_bytes, var_size_in_bytes, obj);
+  if (AllocatePrefetchZeroing) {
+#ifdef ASSERT
+    {
+      Label PASSED;
+      Register current_pf_top = t0;
+      __ ld(current_pf_top, Address(xthread, JavaThread::tlab_pf_top_offset()));
+      __ bgeu(current_pf_top, obj, PASSED); // current_pf_top >= obj
+      __ stop("PF top under obj, zeroing published memory.");
+      __ bind(PASSED);
+    }
+#endif
+    prefetch_zero(masm, new_tlab_top);
+#ifdef ASSERT
+    {
+      Label PASSED;
+      Register current_pf_top = t0;
+      __ ld(current_pf_top, Address(xthread, JavaThread::tlab_pf_top_offset()));
+      __ bgeu(current_pf_top, new_tlab_top, PASSED);
+      __ stop("Not EQ");
+      __ bind(PASSED);
+    }
+#endif
   }
 }
 
