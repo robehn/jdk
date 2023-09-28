@@ -54,6 +54,32 @@ inline void OrderAccess::fence() {
 }
 
 inline void OrderAccess::cross_modify_fence_impl() {
+  // From 3 “Zifencei” Instruction-Fetch Fence, Version 2.0
+  // "RISC-V does not guarantee that stores to instruction memory will be made
+  // visible to instruction fetches on a RISC-V hart until that hart executes a
+  // FENCE.I instruction. A FENCE.I instruction ensures that a subsequent
+  // instruction fetch on a RISC-V hart will see any previous data stores
+  // already visible to the same RISC-V hart. FENCE.I does not ensure that other
+  // RISC-V harts’ instruction fetches will observe the local hart’s stores in a
+  // multiprocessor system."
+  //
+  // If the I cache is updated and if a context switch to a new hart guarantees
+  // no stale I cache:
+  // The current hart can still execute instructions out-of-order, which means
+  // e.g. an immediate to materialize an address may be executed before the
+  // 'barrier'. When executing the barrier it may be disarmed and the stale
+  // instruction can retire.
+  //
+  // Note that this also dependent on ICache flush implementation,
+  // e.g. using full system IPI before releasing the 'barrier' this is not
+  // strictly needed. That implementation is somewhat opaque to us, thus we
+  // always emit proper fence.
+  if (VM_Version::supports_fencei_barrier()) {
+    // It's been requested to use fence.i through a VDSO call instead.
+    // This way the kernel could know that no stale I cache is allowed
+    // when context switching. There is no such vdso yet.
+    __asm__ volatile("fence.i" : : : "memory");
+  }
 }
 
 #endif // OS_CPU_LINUX_RISCV_ORDERACCESS_LINUX_RISCV_HPP

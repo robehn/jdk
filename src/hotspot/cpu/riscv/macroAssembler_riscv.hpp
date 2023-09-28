@@ -392,6 +392,8 @@ class MacroAssembler: public Assembler {
     }
   }
 
+  void cmodx_fence();
+
   void pause() {
     Assembler::fence(w, 0);
   }

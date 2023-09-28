@@ -2409,6 +2409,7 @@ class StubGenerator: public StubCodeGenerator {
       __ la(t1, ExternalAddress(bs_asm->patching_epoch_addr()));
       __ lwu(t1, t1);
       __ sw(t1, thread_epoch_addr);
+      __ cmodx_fence();
       __ membar(__ LoadLoad);
     }
 
