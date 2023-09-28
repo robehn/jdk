@@ -1,0 +1,20 @@
+template<size_t byte_size>
+template<typename T>
+inline T Atomic::PlatformCmpxchg<byte_size>::operator()(T volatile* dest __attribute__((unused)),
+                                                        T compare_value,
+                                                        T exchange_value,
+                                                        atomic_memory_order order) const {
+  static_assert((byte_size == sizeof(T)), "byte_size == sizeof(T)");
+  if (order != memory_order_relaxed) {
+    __sync_synchronize();
+  }
+
+  __atomic_compare_exchange(dest, &compare_value, &exchange_value, false,
+                            0, 0);
+
+  if (order != memory_order_relaxed) {
+    __sync_synchronize();
+  }
+  return compare_value;
+}
+
