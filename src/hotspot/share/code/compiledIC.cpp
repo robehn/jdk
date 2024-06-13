@@ -174,7 +174,11 @@ CompiledIC* CompiledIC_before(nmethod* nm, address return_addr) {
 
 CompiledIC* CompiledIC_at(nmethod* nm, address call_site) {
   RelocIterator iter(nm, call_site, call_site + 1);
-  iter.next();
+  while (iter.next()) {
+    if (iter.reloc()->type() == relocInfo::virtual_call_type) {
+      break;
+    }
+  }
   return CompiledIC_at(&iter);
 }
 
@@ -333,7 +337,10 @@ void CompiledDirectCall::set_to_clean() {
     case relocInfo::opt_virtual_call_type:
       _call->set_destination_mt_safe(SharedRuntime::get_resolve_opt_virtual_call_stub());
       break;
+    case relocInfo::section_word_type:
+      break;
     default:
+      assert(false, "Type: %d", iter.type());
       ShouldNotReachHere();
     }
   }
@@ -402,7 +409,10 @@ address CompiledDirectCall::find_stub_for(address instruction) {
         // from the CompiledIC implementation
         case relocInfo::opt_virtual_call_type:
           return iter.opt_virtual_call_reloc()->static_stub();
+        case relocInfo::section_word_type:
+          break;
         default:
+          assert(false, "Type: %d", iter.type());
           ShouldNotReachHere();
       }
     }

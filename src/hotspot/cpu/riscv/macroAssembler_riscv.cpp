@@ -4243,28 +4243,29 @@ address MacroAssembler::load_and_call(Address entry) {
          entry.rspec().type() == relocInfo::static_call_type ||
          entry.rspec().type() == relocInfo::virtual_call_type, "wrong reloc type");
 
+
   address target = entry.target();
+  address addr_to_cp_entry = nullptr;
 
   if (!in_scratch_emit_size()) {
-    address stub = emit_address_stub(offset(), target);
-    if (stub == nullptr) {
-      postcond(pc() == badAddress);
+    addr_to_cp_entry = address_constant(target);
+    if (addr_to_cp_entry == nullptr) {
       return nullptr; // CodeCache is full
     }
+
+    RelocationHolder rh = section_word_Relocation::spec(addr_to_cp_entry, CodeBuffer::SECT_CONSTS);
+    relocate(rh);
+  } else {
+    addr_to_cp_entry = pc();
   }
 
-  address call_pc = pc();
-#ifdef ASSERT
-  if (entry.rspec().type() != relocInfo::runtime_call_type) {
-    assert_alignment(call_pc);
-  }
-#endif
+  address call_at = pc();
   relocate(entry.rspec(), [&] {
-    load_link_jump(target);
+    load_link_jump(addr_to_cp_entry);
   });
 
   postcond(pc() != badAddress);
-  return call_pc;
+  return call_at;
 }
 
 address MacroAssembler::ic_call(address entry, jint method_index) {
