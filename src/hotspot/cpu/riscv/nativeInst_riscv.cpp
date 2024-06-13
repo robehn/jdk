@@ -324,48 +324,31 @@ class NativeFarCall: public NativeInstruction {
   bool set_destination_mt_safe(address dest, bool assert_lock = true);
   bool reloc_set_destination(address dest);
 
- private:
-  address stub_address();
-
-  static void set_stub_address_destination_at(address dest, address value);
-  static address stub_address_destination_at(address src);
- public:
-
   static NativeFarCall* at(address addr);
   static bool is_at(address addr);
   static bool is_call_before(address return_address);
 };
 
 address NativeFarCall::destination() const {
-  address addr = instruction_address();
-  assert(NativeFarCall::is_at(addr), "unexpected code at call site");
-
-  address destination = MacroAssembler::target_addr_for_insn(addr);
-
-  CodeBlob* cb = CodeCache::find_blob(addr);
-  assert(cb && cb->is_nmethod(), "sanity");
-  nmethod *nm = (nmethod *)cb;
-  assert(nm != nullptr, "Sanity");
-  assert(nm->stub_contains(destination), "Sanity");
-  assert(destination != nullptr, "Sanity");
-  return stub_address_destination_at(destination);
+  address addr = addr_at(0);
+  address dest_addr = MacroAssembler::target_addr_for_insn(addr);
+  address dest = (address)get_data64_at(dest_addr);
+  return dest;
 }
 
 address NativeFarCall::reloc_destination(address orig_address) {
-  address call_addr = instruction_address();
+  address new_addr = instruction_address();
 
-  CodeBlob *code = CodeCache::find_blob(call_addr);
-  assert(code != nullptr, "Could not find the containing code blob");
-
-  address stub_addr = nullptr;
-  if (code != nullptr && code->is_nmethod()) {
-    stub_addr = trampoline_stub_Relocation::get_trampoline_for(call_addr, (nmethod*)code);
+  if (orig_address != nullptr) {
+    assert(NativeFarCall::is_at(orig_address), "unexpected code at call site");
+    address old_cp_dest = MacroAssembler::target_addr_for_insn(orig_address);
+    address old_dest = (address)get_data64_at(old_cp_dest);
+    return old_dest;
+  } else {
+    address new_cp_dest = MacroAssembler::target_addr_for_insn(new_addr);
+    address new_dest = (address)get_data64_at(new_cp_dest);
+    return new_dest;
   }
-
-  if (stub_addr != nullptr) {
-    stub_addr = MacroAssembler::target_addr_for_insn(call_addr);
-  }
-  return stub_addr;
 }
 
 void NativeFarCall::set_destination(address dest) {
@@ -391,60 +374,43 @@ bool NativeFarCall::set_destination_mt_safe(address dest, bool assert_lock) {
          "concurrent code patching");
 
   address call_addr = addr_at(0);
-  assert(NativeFarCall::is_at(call_addr), "unexpected code at call site");
+  address cp_pool_addr = MacroAssembler::target_addr_for_insn(call_addr);
 
-  address stub_addr = stub_address();
-
-  if (stub_addr != nullptr) {
-    set_stub_address_destination_at(stub_addr, dest);
-    return true;
-  }
-
-  return false;
+  assert(cp_pool_addr != nullptr, "Must be");
+  set_data64_at(cp_pool_addr, (uint64_t)dest);
+  OrderAccess::release();
+  return true;
 }
 
 bool NativeFarCall::reloc_set_destination(address dest) {
   address call_addr = addr_at(0);
-  assert(NativeFarCall::is_at(call_addr), "unexpected code at call site");
 
-  CodeBlob *code = CodeCache::find_blob(call_addr);
-  assert(code != nullptr, "Could not find the containing code blob");
+  CodeBlob* cb = CodeCache::find_blob(call_addr);
+  assert(cb != nullptr, "Could not find code blob");
+  nmethod* nm = cb->as_nmethod_or_null();
 
-  address stub_addr = nullptr;
-  if (code != nullptr && code->is_nmethod()) {
-    stub_addr = trampoline_stub_Relocation::get_trampoline_for(call_addr, (nmethod*)code);
+  address cp_entry_addr = nullptr;
+  if (nm != nullptr) {
+    RelocIterator iter(nm, instruction_address(), next_instruction_address());
+    while (iter.next()) {
+      if (iter.type() == relocInfo::section_word_type) {
+        cp_entry_addr = iter.section_word_reloc()->target();
+        break;
+      }
+    }
   }
 
-  if (stub_addr != nullptr) {
-    MacroAssembler::pd_patch_instruction_size(call_addr, stub_addr);
+  if (cp_entry_addr != nullptr) {
+    MacroAssembler::pd_patch_instruction_size(call_addr, cp_entry_addr);
+  } else {
+    cp_entry_addr = MacroAssembler::target_addr_for_insn(call_addr);
   }
+
+  assert(MacroAssembler::target_addr_for_insn(call_addr) == cp_entry_addr, "Must be");
+
+  set_data64_at(cp_entry_addr, (uint64_t)dest);
 
   return true;
-}
-
-void NativeFarCall::set_stub_address_destination_at(address dest, address value) {
-  assert_cond(dest != nullptr);
-  assert_cond(value != nullptr);
-
-  set_data64_at(dest, (uint64_t)value);
-  OrderAccess::release();
-}
-
-address NativeFarCall::stub_address_destination_at(address src) {
-  assert_cond(src != nullptr);
-  address dest = (address)get_data64_at(src);
-  return dest;
-}
-
-address NativeFarCall::stub_address() {
-  address call_addr = addr_at(0);
-
-  CodeBlob *code = CodeCache::find_blob(call_addr);
-  assert(code != nullptr, "Could not find the containing code blob");
-
-  address dest = MacroAssembler::pd_call_destination(call_addr);
-  assert(code->contains(dest), "Sanity");
-  return dest;
 }
 
 NativeFarCall* NativeFarCall::at(address addr) {
