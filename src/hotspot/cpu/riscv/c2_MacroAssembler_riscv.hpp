@@ -62,12 +62,10 @@
                                                    Register cached_monitor, Register scratch1, Register scratch2);
 
   void fast_unlock_lightweight_lockstack(Register obj, Register box,
-                                         Label& inflated, Label& inflated_load_mark,
-                                         Label& unlocked, Label& slow_path,
+                                         Label& inflated, Label& unlocked, Label& slow_path,
                                          Register scratch1, Register scratch2, Register scratch3);
   void fast_unlock_lightweight_inflated(Register obj, Register box,
-                                        Label& inflated, Label& inflated_load_mark,
-                                        Label& unlocked, Label& slow_path,
+                                        Label& inflated, Label& unlocked, Label& slow_path,
                                         Register scratch1, Register scratch2, Register scratch3);
  public:
   void string_compare(Register str1, Register str2,
