@@ -253,20 +253,131 @@ void C2_MacroAssembler::fast_unlock(Register objectReg, Register boxReg,
   // C2 uses the value of flag (0 vs !0) to determine the continuation.
 }
 
+void C2_MacroAssembler::fast_lock_lightweight_lockstack(Register obj, Register box,
+                                                 Label& inflated, Label& locked, Label& slow_path,
+                                                 Register scratch1, Register scratch2, Register scratch3) {
+  Register mark = scratch1;
+  Register top  = scratch2;
+  Register tmp  = scratch3;
+  // Push lock to the lock stack and finish successfully. MUST branch to with flag == 0
+  Label push;
+
+  // Check if lock-stack is full.
+  lwu(top, Address(xthread, JavaThread::lock_stack_top_offset()));
+  mv(tmp, (unsigned)LockStack::end_offset());
+  bge(top, tmp, slow_path);
+
+  // Check if recursive.
+  add(tmp, xthread, top);
+  ld(tmp, Address(tmp, -oopSize));
+  beq(obj, tmp, push);
+
+  // Relaxed normal load to check for monitor. Optimization for monitor case.
+  ld(mark, Address(obj, oopDesc::mark_offset_in_bytes()));
+  test_bit(tmp, mark, exact_log2(markWord::monitor_value));
+  bnez(tmp, inflated);
+
+  // Not inflated
+  assert(oopDesc::mark_offset_in_bytes() == 0, "required to avoid a la");
+
+  // Try to lock. Transition lock-bits 0b01 => 0b00
+  ori(mark, mark, markWord::unlocked_value);
+  xori(tmp, mark, markWord::unlocked_value);
+  cmpxchg(/*addr*/ obj, /*expected*/ mark, /*new*/ tmp, Assembler::int64,
+          /*acquire*/ Assembler::aq, /*release*/ Assembler::relaxed, /*result*/ tmp);
+  bne(mark, tmp, slow_path);
+
+  bind(push);
+  // After successful lock, push object on lock-stack.
+  add(tmp, xthread, top);
+  sd(obj, Address(tmp));
+  addw(top, top, oopSize);
+  sw(top, Address(xthread, JavaThread::lock_stack_top_offset()));
+  j(locked);
+}
+
+void C2_MacroAssembler::fast_lock_lightweight_inflated_cache_lookup(Register obj,
+                                                                    Label& slow_path,
+                                                                    Register cached_monitor, Register scratch1, Register scratch2) {
+  Label monitor_found;
+  
+  Register cached_oop = scratch1;
+  Register oop_addr   = scratch2;
+
+  // Load cache address
+  la(oop_addr, Address(xthread, JavaThread::om_cache_oops_offset()));
+
+  const int num_unrolled = 2;
+  for (int i = 0; i < num_unrolled; i++) {
+    ld(cached_oop, Address(oop_addr));
+    beq(obj, cached_oop, monitor_found);
+    add(oop_addr, oop_addr, in_bytes(OMCache::oop_to_oop_difference()));
+  }
+
+  Label loop;
+
+  // Search for obj in cache.
+  bind(loop);
+
+  // Check for match.
+  ld(cached_oop, Address(oop_addr));
+  beq(obj, cached_oop, monitor_found);
+
+  // Search until null encountered, guaranteed _null_sentinel at end.
+  add(oop_addr, oop_addr, in_bytes(OMCache::oop_to_oop_difference()));
+  bnez(cached_oop, loop);
+  // Cache Miss. Take the slowpath.
+  j(slow_path);
+
+  bind(monitor_found);
+  ld(cached_monitor, Address(oop_addr, OMCache::oop_to_monitor_difference()));
+}
+
+void C2_MacroAssembler::fast_lock_lightweight_inflated(Register obj, Register box, Label& inflated, Label& locked, Label& slow_path,
+                                                       Register monitor, Register scratch1, Register scratch2) {
+  bind(inflated);
+
+  if (UseObjectMonitorTable) {
+    fast_lock_lightweight_inflated_cache_lookup(obj, slow_path, monitor, scratch1, scratch2);
+  }
+
+  Register owner = scratch1;
+  const ByteSize monitor_tag = in_ByteSize(UseObjectMonitorTable ? 0 : checked_cast<int>(markWord::monitor_value));
+  const Address owner_address(monitor, ObjectMonitor::owner_offset() - monitor_tag);
+  const Address recursions_address(monitor, ObjectMonitor::recursions_offset() - monitor_tag);
+
+  Label monitor_locked;
+
+  // Compute owner address.
+  la(owner, owner_address);
+
+  // CAS owner (null => current thread).
+  cmpxchg(/*addr*/ owner, /*expected*/ zr, /*new*/ xthread, Assembler::int64,
+          /*acquire*/ Assembler::aq, /*release*/ Assembler::relaxed, /*result*/ scratch2);
+  beqz(scratch2, monitor_locked);
+
+  // Check if recursive.
+  bne(scratch2, xthread, slow_path);
+
+  // Recursive.
+  increment(recursions_address, 1, owner, scratch2);
+
+  bind(monitor_locked);
+  if (UseObjectMonitorTable) {
+    sd(monitor, Address(box, BasicLock::object_monitor_cache_offset_in_bytes()));
+  }
+}
+
 void C2_MacroAssembler::fast_lock_lightweight(Register obj, Register box,
-                                              Register tmp1, Register tmp2, Register tmp3) {
+                                              Register scratch1, Register scratch2, Register scratch3) {
   // Flag register, zero for success; non-zero for failure.
   Register flag = t1;
 
   assert(LockingMode == LM_LIGHTWEIGHT, "must be");
-  assert_different_registers(obj, box, tmp1, tmp2, tmp3, flag, t0);
+  assert_different_registers(obj, box, scratch1, scratch2, scratch3, flag, t0);
 
   mv(flag, 1);
 
-  // Handle inflated monitor.
-  Label inflated;
-  // Finish fast lock successfully. MUST branch to with flag == 0
-  Label locked;
   // Finish fast lock unsuccessfully. slow_path MUST branch to with flag != 0
   Label slow_path;
 
@@ -276,126 +387,23 @@ void C2_MacroAssembler::fast_lock_lightweight(Register obj, Register box,
   }
 
   if (DiagnoseSyncOnValueBasedClasses != 0) {
-    load_klass(tmp1, obj);
-    lwu(tmp1, Address(tmp1, Klass::access_flags_offset()));
-    test_bit(tmp1, tmp1, exact_log2(JVM_ACC_IS_VALUE_BASED_CLASS));
-    bnez(tmp1, slow_path);
+    load_klass(scratch1, obj);
+    lwu(scratch1, Address(scratch1, Klass::access_flags_offset()));
+    test_bit(scratch1, scratch1, exact_log2(JVM_ACC_IS_VALUE_BASED_CLASS));
+    bnez(scratch1, slow_path);
   }
 
-  const Register tmp1_mark = tmp1;
-  const Register tmp3_t = tmp3;
-
-  { // Lightweight locking
-
-    // Push lock to the lock stack and finish successfully. MUST branch to with flag == 0
-    Label push;
-
-    const Register tmp2_top = tmp2;
-
-    // Check if lock-stack is full.
-    lwu(tmp2_top, Address(xthread, JavaThread::lock_stack_top_offset()));
-    mv(tmp3_t, (unsigned)LockStack::end_offset());
-    bge(tmp2_top, tmp3_t, slow_path);
-
-    // Check if recursive.
-    add(tmp3_t, xthread, tmp2_top);
-    ld(tmp3_t, Address(tmp3_t, -oopSize));
-    beq(obj, tmp3_t, push);
-
-    // Relaxed normal load to check for monitor. Optimization for monitor case.
-    ld(tmp1_mark, Address(obj, oopDesc::mark_offset_in_bytes()));
-    test_bit(tmp3_t, tmp1_mark, exact_log2(markWord::monitor_value));
-    bnez(tmp3_t, inflated);
-
-    // Not inflated
-    assert(oopDesc::mark_offset_in_bytes() == 0, "required to avoid a la");
-
-    // Try to lock. Transition lock-bits 0b01 => 0b00
-    ori(tmp1_mark, tmp1_mark, markWord::unlocked_value);
-    xori(tmp3_t, tmp1_mark, markWord::unlocked_value);
-    cmpxchg(/*addr*/ obj, /*expected*/ tmp1_mark, /*new*/ tmp3_t, Assembler::int64,
-            /*acquire*/ Assembler::aq, /*release*/ Assembler::relaxed, /*result*/ tmp3_t);
-    bne(tmp1_mark, tmp3_t, slow_path);
-
-    bind(push);
-    // After successful lock, push object on lock-stack.
-    add(tmp3_t, xthread, tmp2_top);
-    sd(obj, Address(tmp3_t));
-    addw(tmp2_top, tmp2_top, oopSize);
-    sw(tmp2_top, Address(xthread, JavaThread::lock_stack_top_offset()));
-    j(locked);
-  }
-
-  { // Handle inflated monitor.
-    bind(inflated);
-
-    const Register tmp1_monitor = tmp1;
-    if (!UseObjectMonitorTable) {
-      assert(tmp1_monitor == tmp1_mark, "should be the same here");
-    } else {
-      Label monitor_found;
-
-      // Load cache address
-      la(tmp3_t, Address(xthread, JavaThread::om_cache_oops_offset()));
-
-      const int num_unrolled = 2;
-      for (int i = 0; i < num_unrolled; i++) {
-        ld(tmp1, Address(tmp3_t));
-        beq(obj, tmp1, monitor_found);
-        add(tmp3_t, tmp3_t, in_bytes(OMCache::oop_to_oop_difference()));
-      }
-
-      Label loop;
-
-      // Search for obj in cache.
-      bind(loop);
-
-      // Check for match.
-      ld(tmp1, Address(tmp3_t));
-      beq(obj, tmp1, monitor_found);
-
-      // Search until null encountered, guaranteed _null_sentinel at end.
-      add(tmp3_t, tmp3_t, in_bytes(OMCache::oop_to_oop_difference()));
-      bnez(tmp1, loop);
-      // Cache Miss. Take the slowpath.
-      j(slow_path);
-
-      bind(monitor_found);
-      ld(tmp1_monitor, Address(tmp3_t, OMCache::oop_to_monitor_difference()));
-    }
-
-    const Register tmp2_owner_addr = tmp2;
-    const Register tmp3_owner = tmp3;
-
-    const ByteSize monitor_tag = in_ByteSize(UseObjectMonitorTable ? 0 : checked_cast<int>(markWord::monitor_value));
-    const Address owner_address(tmp1_monitor, ObjectMonitor::owner_offset() - monitor_tag);
-    const Address recursions_address(tmp1_monitor, ObjectMonitor::recursions_offset() - monitor_tag);
-
-    Label monitor_locked;
-
-    // Compute owner address.
-    la(tmp2_owner_addr, owner_address);
-
-    // CAS owner (null => current thread).
-    cmpxchg(/*addr*/ tmp2_owner_addr, /*expected*/ zr, /*new*/ xthread, Assembler::int64,
-            /*acquire*/ Assembler::aq, /*release*/ Assembler::relaxed, /*result*/ tmp3_owner);
-    beqz(tmp3_owner, monitor_locked);
-
-    // Check if recursive.
-    bne(tmp3_owner, xthread, slow_path);
-
-    // Recursive.
-    increment(recursions_address, 1, tmp2, tmp3);
-
-    bind(monitor_locked);
-    if (UseObjectMonitorTable) {
-      sd(tmp1_monitor, Address(box, BasicLock::object_monitor_cache_offset_in_bytes()));
-    }
-  }
+  // Handle inflated monitor.
+  Label inflated;
+  // Finish fast lock successfully. MUST branch to with flag == 0
+  Label locked;
+  fast_lock_lightweight_lockstack(obj, box, inflated, locked, slow_path, scratch1, scratch2, scratch3);
+  fast_lock_lightweight_inflated(obj, box, inflated, locked, slow_path, scratch1, scratch2, scratch3);
 
   bind(locked);
+
   mv(flag, zr);
-  increment(Address(xthread, JavaThread::held_monitor_count_offset()), 1, tmp2, tmp3);
+  increment(Address(xthread, JavaThread::held_monitor_count_offset()), 1, scratch2, scratch3);
 
 #ifdef ASSERT
   // Check that locked label is reached with flag == 0.
