@@ -425,131 +425,129 @@ void C2_MacroAssembler::fast_lock_lightweight(Register obj, Register box,
 void C2_MacroAssembler::fast_unlock_lightweight_lockstack(Register obj, Register box,
                                                  Label& inflated, Label& inflated_load_mark,
                                                  Label& unlocked, Label& slow_path,
-                                                 Register scratch1, Register scratch2, Register scratch3) {
-  
-  const Register tmp1_mark = scratch1;
-  const Register tmp2_top = scratch2;
-  const Register tmp3_t = scratch3;
+                                                 Register mark, Register top, Register scratch3) {
+  const Register tmp = scratch3;
 
   // Check if obj is top of lock-stack.
-  lwu(tmp2_top, Address(xthread, JavaThread::lock_stack_top_offset()));
-  subw(tmp2_top, tmp2_top, oopSize);
-  add(tmp3_t, xthread, tmp2_top);
-  ld(tmp3_t, Address(tmp3_t));
+  lwu(top, Address(xthread, JavaThread::lock_stack_top_offset()));
+  subw(top, top, oopSize);
+  add(tmp, xthread, top);
+  ld(tmp, Address(tmp));
   // Top of lock stack was not obj. Must be monitor.
-  bne(obj, tmp3_t, inflated_load_mark);
+  bne(obj, tmp, inflated_load_mark);
 
   // Pop lock-stack.
-  DEBUG_ONLY(add(tmp3_t, xthread, tmp2_top);)
-  DEBUG_ONLY(sd(zr, Address(tmp3_t));)
-  sw(tmp2_top, Address(xthread, JavaThread::lock_stack_top_offset()));
+  DEBUG_ONLY(add(tmp, xthread, top);)
+  DEBUG_ONLY(sd(zr, Address(tmp));)
+  sw(top, Address(xthread, JavaThread::lock_stack_top_offset()));
 
   // Check if recursive.
-  add(tmp3_t, xthread, tmp2_top);
-  ld(tmp3_t, Address(tmp3_t, -oopSize));
-  beq(obj, tmp3_t, unlocked);
+  add(tmp, xthread, top);
+  ld(tmp, Address(tmp, -oopSize));
+  beq(obj, tmp, unlocked);
 
   // Not recursive.
   // Load Mark.
-  ld(tmp1_mark, Address(obj, oopDesc::mark_offset_in_bytes()));
+  ld(mark, Address(obj, oopDesc::mark_offset_in_bytes()));
 
   // Check header for monitor (0b10).
   // Because we got here by popping (meaning we pushed in locked)
   // there will be no monitor in the box. So we need to push back the obj
   // so that the runtime can fix any potential anonymous owner.
-  test_bit(tmp3_t, tmp1_mark, exact_log2(markWord::monitor_value));
+  test_bit(tmp, mark, exact_log2(markWord::monitor_value));
   {
     Label push_and_slow_path;
-    bnez(tmp3_t, UseObjectMonitorTable ? push_and_slow_path : inflated);
+    bnez(tmp, UseObjectMonitorTable ? push_and_slow_path : inflated);
 
     // Try to unlock. Transition lock bits 0b00 => 0b01
     assert(oopDesc::mark_offset_in_bytes() == 0, "required to avoid lea");
-    ori(tmp3_t, tmp1_mark, markWord::unlocked_value);
-    cmpxchg(/*addr*/ obj, /*expected*/ tmp1_mark, /*new*/ tmp3_t, Assembler::int64,
-            /*acquire*/ Assembler::relaxed, /*release*/ Assembler::rl, /*result*/ tmp3_t);
-    beq(tmp1_mark, tmp3_t, unlocked);
+    ori(tmp, mark, markWord::unlocked_value);
+    cmpxchg(/*addr*/ obj, /*expected*/ mark, /*new*/ tmp, Assembler::int64,
+            /*acquire*/ Assembler::relaxed, /*release*/ Assembler::rl, /*result*/ tmp);
+    beq(mark, tmp, unlocked);
 
     bind(push_and_slow_path);
   }
   // Compare and exchange failed.
   // Restore lock-stack and handle the unlock in runtime.
-  DEBUG_ONLY(add(tmp3_t, xthread, tmp2_top);)
-  DEBUG_ONLY(sd(obj, Address(tmp3_t));)
-  addw(tmp2_top, tmp2_top, oopSize);
-  sd(tmp2_top, Address(xthread, JavaThread::lock_stack_top_offset()));
+  DEBUG_ONLY(add(tmp, xthread, top);)
+  DEBUG_ONLY(sd(obj, Address(tmp));)
+  addw(top, top, oopSize);
+  sd(top, Address(xthread, JavaThread::lock_stack_top_offset()));
   j(slow_path);
 }
 
 void C2_MacroAssembler::fast_unlock_lightweight_inflated(Register obj, Register box,
                                                  Label& inflated, Label& inflated_load_mark,
                                                  Label& unlocked, Label& slow_path,
-                                                 Register scratch1, Register scratch2, Register scratch3) {
-  const Register tmp1_mark = scratch1;
-  const Register tmp2_top  = scratch2;
-  const Register tmp3_t    = scratch3;
+                                                 Register mark, Register top, Register scratch3) {
+  const Register tmp = scratch3;
 
- // Handle inflated monitor.
+  // Handle inflated monitor.
   bind(inflated_load_mark);
-  ld(tmp1_mark, Address(obj, oopDesc::mark_offset_in_bytes()));
+  ld(mark, Address(obj, oopDesc::mark_offset_in_bytes()));
+  
+  {
 #ifdef ASSERT
-  test_bit(tmp3_t, tmp1_mark, exact_log2(markWord::monitor_value));
-  bnez(tmp3_t, inflated);
-  stop("Fast Unlock not monitor");
+    test_bit(tmp, mark, exact_log2(markWord::monitor_value));
+    bnez(tmp, inflated);
+    stop("Fast Unlock not monitor");
 #endif
+  }
 
   bind(inflated);
 
   {
 #ifdef ASSERT
     Label check_done;
-    subw(tmp2_top, tmp2_top, oopSize);
-    mv(tmp3_t, in_bytes(JavaThread::lock_stack_base_offset()));
-    blt(tmp2_top, tmp3_t, check_done);
-    add(tmp3_t, xthread, tmp2_top);
-    ld(tmp3_t, Address(tmp3_t));
-    bne(obj, tmp3_t, inflated);
+    subw(top, top, oopSize);
+    mv(tmp, in_bytes(JavaThread::lock_stack_base_offset()));
+    blt(top, tmp, check_done);
+    add(tmp, xthread, top);
+    ld(tmp, Address(tmp));
+    bne(obj, tmp, inflated);
     stop("Fast Unlock lock on stack");
     bind(check_done);
 #endif
   }
 
-  const Register tmp1_monitor = scratch1;
+  const Register monitor = mark; // We no longer need mark
 
   if (!UseObjectMonitorTable) {
-    assert(tmp1_monitor == tmp1_mark, "should be the same here");
+    assert(monitor == mark, "should be the same here");
     // Untag the monitor.
-    add(tmp1_monitor, tmp1_mark, -(int)markWord::monitor_value);
+    add(monitor, mark, -(int)markWord::monitor_value);
   } else {
-    ld(tmp1_monitor, Address(box, BasicLock::object_monitor_cache_offset_in_bytes()));
+    ld(monitor, Address(box, BasicLock::object_monitor_cache_offset_in_bytes()));
     // No valid pointer below alignof(ObjectMonitor*). Take the slow path.
-    mv(tmp3_t, alignof(ObjectMonitor*));
-    bltu(tmp1_monitor, tmp3_t, slow_path);
+    mv(tmp, alignof(ObjectMonitor*));
+    bltu(monitor, tmp, slow_path);
   }
 
-  const Register tmp2_recursions = scratch2;
+  const Register tmp2_recursions = top;
   Label not_recursive;
 
   // Check if recursive.
-  ld(tmp2_recursions, Address(tmp1_monitor, ObjectMonitor::recursions_offset()));
+  ld(tmp2_recursions, Address(monitor, ObjectMonitor::recursions_offset()));
   beqz(tmp2_recursions, not_recursive);
 
   // Recursive unlock.
   addi(tmp2_recursions, tmp2_recursions, -1);
-  sd(tmp2_recursions, Address(tmp1_monitor, ObjectMonitor::recursions_offset()));
+  sd(tmp2_recursions, Address(monitor, ObjectMonitor::recursions_offset()));
   j(unlocked);
 
   bind(not_recursive);
 
   Label release;
-  const Register tmp2_owner_addr = scratch2;
+  const Register tmp2_owner_addr = top;
 
   // Compute owner address.
-  la(tmp2_owner_addr, Address(tmp1_monitor, ObjectMonitor::owner_offset()));
+  la(tmp2_owner_addr, Address(monitor, ObjectMonitor::owner_offset()));
 
   // Check if the entry lists are empty.
-  ld(t0, Address(tmp1_monitor, ObjectMonitor::EntryList_offset()));
-  ld(tmp3_t, Address(tmp1_monitor, ObjectMonitor::cxq_offset()));
-  orr(t0, t0, tmp3_t);
+  ld(t0, Address(monitor, ObjectMonitor::EntryList_offset()));
+  ld(tmp, Address(monitor, ObjectMonitor::cxq_offset()));
+  orr(t0, t0, tmp);
   beqz(t0, release);
 
   // The owner may be anonymous and we removed the last obj entry in
@@ -588,9 +586,6 @@ void C2_MacroAssembler::fast_unlock_lightweight(Register obj, Register box,
                                   scratch1, scratch2, scratch3);
   
   const Register tmp1_mark = scratch1;
-  const Register tmp2_top  = scratch2;
-  const Register tmp3_t    = scratch3;
-
 
   bind(unlocked);
   mv(flag, zr);
