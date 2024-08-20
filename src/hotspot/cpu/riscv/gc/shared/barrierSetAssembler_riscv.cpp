@@ -276,7 +276,12 @@ void BarrierSetAssembler::nmethod_entry_barrier(MacroAssembler* masm, Label* slo
 
         __ la(t1, ExternalAddress((address)&_patching_epoch));
         if (!UseZtso) {
-          __ membar(MacroAssembler::LoadLoad);
+          if (UseNewCode) {
+            __ srli(ra, t0, 32);
+            __ orr(t1, t1, ra);
+          } else {
+            __ membar(MacroAssembler::LoadLoad);
+          }
         }
         // Read the global epoch value.
         __ lwu(t1, t1);
