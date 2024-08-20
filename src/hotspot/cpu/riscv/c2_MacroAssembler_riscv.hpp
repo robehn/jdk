@@ -48,16 +48,28 @@
   void fast_unlock(Register object, Register box, Register tmp1, Register tmp2);
   // Code used by cmpFastLockLightweight and cmpFastUnlockLightweight mach instructions in .ad file.
   void fast_lock_lightweight(Register object, Register box, Register scratch1, Register scratch2, Register scratch3);
- private:
-  void fast_lock_lightweight_lockstack(Register obj, Register box, Label& inflated, Label& locked, Label& slow_path,
-                                                 Register scratch1, Register scratch2, Register scratch3);
-  void fast_lock_lightweight_inflated(Register obj, Register box, Label& inflated, Label& locked, Label& slow_path,
-                                                       Register monitor, Register scratch1, Register scratch2);
-  void fast_lock_lightweight_inflated_cache_lookup(Register obj, Label& slow_path,
-                                                       Register cached_monitor, Register scratch1, Register scratch2);
- public:
-  void fast_unlock_lightweight(Register object, Register box, Register tmp1, Register tmp2, Register tmp3);
+  void fast_unlock_lightweight(Register object, Register box, Register scratch1, Register scratch2, Register scratch3);
 
+ private:
+  void fast_lock_lightweight_lockstack(Register obj, Register box,
+                                       Label& inflated, Label& locked, Label& slow_path,
+                                       Register scratch1, Register scratch2, Register scratch3);
+  void fast_lock_lightweight_inflated(Register obj, Register box,
+                                      Label& inflated, Label& locked, Label& slow_path,
+                                      Register monitor, Register scratch1, Register scratch2);
+  void fast_lock_lightweight_inflated_cache_lookup(Register obj,
+                                                   Label& slow_path,
+                                                   Register cached_monitor, Register scratch1, Register scratch2);
+
+  void fast_unlock_lightweight_lockstack(Register obj, Register box,
+                                         Label& inflated, Label& inflated_load_mark,
+                                         Label& unlocked, Label& slow_path,
+                                         Register scratch1, Register scratch2, Register scratch3);
+  void fast_unlock_lightweight_inflated(Register obj, Register box,
+                                        Label& inflated, Label& inflated_load_mark,
+                                        Label& unlocked, Label& slow_path,
+                                        Register scratch1, Register scratch2, Register scratch3);
+ public:
   void string_compare(Register str1, Register str2,
                       Register cnt1, Register cnt2, Register result,
                       Register tmp1, Register tmp2, Register tmp3,
